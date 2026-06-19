@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid, AreaChart, Area } from "recharts";
 
 // ─── i-CONVERGENCE BRAND ───────────────────────────────────────────
@@ -47,6 +47,66 @@ const TXNS = RAW_TXNS.map((r, i) => ({
   ccy: r[7], qty: r[8], consideration: r[9],
   netamt: r[10], costprice: r[11], costvalue: r[12],
 }));
+
+// ─── GOOGLE SHEETS CONFIG ────────────────────────────────────────────
+// Paste your values here after completing the setup guide
+const SHEETS_CONFIG = {
+  SPREADSHEET_ID: "", // e.g. "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"
+  API_KEY: "",        // Google Cloud API key (restricted to Sheets API)
+  SHEET_NAME: "Withdrawals", // Tab name in your spreadsheet
+};
+
+// Column order in the spreadsheet:
+// A: Request ID | B: Date | C: Client ID | D: Client Name
+// E: Withdrawal Type | F: Amount | G: CCY | H: Notes | I: Requested By | J: Status
+
+const sheetsConfigured = () => SHEETS_CONFIG.SPREADSHEET_ID && SHEETS_CONFIG.API_KEY;
+
+const appendToSheet = async (row) => {
+  if (!sheetsConfigured()) return { ok: false, error: "not_configured" };
+  try {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEETS_CONFIG.SPREADSHEET_ID}/values/${SHEETS_CONFIG.SHEET_NAME}!A:J:append?valueInputOption=USER_ENTERED&key=${SHEETS_CONFIG.API_KEY}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [row] }),
+    });
+    return res.ok ? { ok: true } : { ok: false, error: await res.text() };
+  } catch(e) {
+    return { ok: false, error: String(e) };
+  }
+};
+
+const readSheetStatuses = async () => {
+  if (!sheetsConfigured()) return {};
+  try {
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEETS_CONFIG.SPREADSHEET_ID}/values/${SHEETS_CONFIG.SHEET_NAME}!A:J?key=${SHEETS_CONFIG.API_KEY}`;
+    const res = await fetch(url);
+    if (!res.ok) return {};
+    const data = await res.json();
+    const rows = (data.values || []).slice(1); // skip header
+    const statusMap = {};
+    rows.forEach(r => { if (r[0]) statusMap[r[0]] = r[9] || "Pending"; });
+    return statusMap;
+  } catch(e) { return {}; }
+};
+
+// ─── WITHDRAWAL REQUEST STORE ────────────────────────────────────────
+// In-memory store with sessionStorage fallback (persists within browser session)
+const WD_STORAGE_KEY = "iconv_wd_requests";
+
+const _getStore = () => {
+  try { return JSON.parse(sessionStorage.getItem(WD_STORAGE_KEY) || "[]"); }
+  catch(e) { return []; }
+};
+const _setStore = (data) => {
+  try { sessionStorage.setItem(WD_STORAGE_KEY, JSON.stringify(data)); }
+  catch(e) { console.warn("sessionStorage unavailable:", e); }
+};
+
+// Synchronous wrappers kept async-shaped so Sheets integration works identically
+const loadRequests = async () => _getStore();
+const saveRequests = async (requests) => { _setStore(requests); };
 
 // ─── CLIENT DATA ─────────────────────────────────────────────────────
 const CLIENTS = [
@@ -340,6 +400,7 @@ const NAV_ITEMS=[
   {key:"transactions",label:"Txns",icon:"⇄"},
   {key:"pricing",label:"Pricing",icon:"◈"},
   {key:"valuations",label:"Valuations",icon:"◎"},
+  {key:"withdrawals",label:"Withdrawals",icon:"↓"},
   {key:"news",label:"News",icon:"📡"},
   {key:"connect",label:"Connect",icon:"⚡"},
 ];
@@ -398,7 +459,7 @@ const Nav=({section,setSection,selectedCcy,setCcy})=>{
       )}
       {isMobile&&(
         <div style={{position:"fixed",bottom:0,left:0,right:0,background:C.navy,borderTop:`1px solid rgba(0,184,176,0.2)`,display:"flex",zIndex:150,height:60}}>
-          {NAV_ITEMS.slice(0,4).map(i=>(
+          {[...NAV_ITEMS.slice(0,3),NAV_ITEMS.find(i=>i.key==="withdrawals")].filter(Boolean).map(i=>(
             <button key={i.key} onClick={()=>handleNav(i.key)} style={{flex:1,background:section===i.key?"rgba(0,184,176,0.1)":"none",border:"none",borderTop:section===i.key?`2px solid ${C.teal}`:"2px solid transparent",color:section===i.key?C.teal:"rgba(255,255,255,0.45)",fontSize:9,fontWeight:section===i.key?600:400,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,fontFamily:"'Inter',sans-serif",padding:"4px 0",transition:"all 0.15s"}}>
               <span style={{fontSize:19,lineHeight:1}}>{i.icon}</span>
               <span>{i.label}</span>
@@ -442,8 +503,8 @@ const Dashboard=({setSection,setSelectedClient,selectedCcy})=>{
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:isMobile?8:10,width:isMobile?"100%":"auto"}}>
           <StatCard label="Active clients" value="4" dark/>
-          <StatCard label="Total holdings" value={Object.values(HOLDINGS).flat().filter(h=>!h.isCash).length} dark/>
-          <StatCard label="Total positions" value={Object.values(HOLDINGS).flat().length} sub="incl. cash" dark/>
+          <StatCard label="Avg. return" value={pct(calcPct(CLIENTS.reduce((s,c)=>s+clientTotals(c.id,selectedCcy).totalCost,0),totalAUM))} sub="across all clients" trend={totalPL>=0?"up":"down"} dark/>
+          <StatCard label="Total AUM cost" value={`${sym}${fmt(CLIENTS.reduce((s,c)=>s+clientTotals(c.id,selectedCcy).totalCost,0),0)}`} sub="inception value" dark/>
           <StatCard label="Compliance" value="100%" sub="4/4 verified" trend="up" dark/>
         </div>
       </div>
@@ -508,11 +569,22 @@ const ClientDetail=({clientId,onBack,selectedCcy})=>{
   const [tab,setTab]=useState("valuation");
   const [showEmail,setShowEmail]=useState(false);
   const [showLog,setShowLog]=useState(false);
+  const [showWD,setShowWD]=useState(false);
   const [emailSubject,setEmailSubject]=useState("");
   const [emailBody,setEmailBody]=useState("");
   const [logNote,setLogNote]=useState("");
   const [logType,setLogType]=useState("call");
   const [comms,setComms]=useState(COMMS[clientId]||[]);
+  // Withdrawal state
+  const [wdType,setWdType]=useState("PCLS");
+  const [wdAmount,setWdAmount]=useState("");
+  const [wdCcy,setWdCcy]=useState("GBP");
+  const [wdNotes,setWdNotes]=useState("");
+  const [wdSubmitting,setWdSubmitting]=useState(false);
+  const [wdError,setWdError]=useState("");
+  const [wdRequests,setWdRequests]=useState([]);
+  const [wdStatusMap,setWdStatusMap]=useState({});
+  const [statusLoading,setStatusLoading]=useState(false);
 
   const sym=CCY_SYMBOLS[selectedCcy]||"$";
   const client=CLIENTS.find(c=>c.id===clientId);
@@ -525,6 +597,26 @@ const ClientDetail=({clientId,onBack,selectedCcy})=>{
   const cashH=holdings.filter(h=>h.isCash);
   const initials=client.name.split(" ").map(n=>n[0]).join("");
 
+  // Load persisted requests and refresh statuses from Sheets
+  useEffect(()=>{
+    loadRequests().then(all=>{
+      const mine=all.filter(r=>r.clientId===clientId);
+      setWdRequests(mine);
+    });
+  },[clientId]);
+
+  const refreshStatuses=async()=>{
+    setStatusLoading(true);
+    const map=await readSheetStatuses();
+    setWdStatusMap(map);
+    // Also update stored requests with latest statuses
+    const all=await loadRequests();
+    const updated=all.map(r=>map[r.id]?{...r,status:map[r.id]}:r);
+    await saveRequests(updated);
+    setWdRequests(updated.filter(r=>r.clientId===clientId));
+    setStatusLoading(false);
+  };
+
   const sendEmail=()=>{
     setComms([{id:Date.now(),date:new Date().toISOString().slice(0,10),type:"email",subject:emailSubject,summary:`Sent: ${emailBody.slice(0,80)}`,user:"JW"},...comms]);
     setShowEmail(false);setEmailSubject("");setEmailBody("");
@@ -534,6 +626,30 @@ const ClientDetail=({clientId,onBack,selectedCcy})=>{
     setShowLog(false);setLogNote("");
   };
 
+  const submitWithdrawal=async()=>{
+    if(!wdAmount||isNaN(parseFloat(wdAmount))){setWdError("Please enter a valid amount.");return;}
+    setWdSubmitting(true);setWdError("");
+    const reqId=`WD-${clientId.slice(-6)}-${Date.now().toString().slice(-6)}`;
+    const dateStr=new Date().toISOString().slice(0,10);
+    const row=[reqId,dateStr,clientId,client.name,wdType,parseFloat(wdAmount).toFixed(2),wdCcy,wdNotes||"—","JW","Pending"];
+    const newReq={id:reqId,clientId,clientName:client.name,date:dateStr,type:wdType,amount:parseFloat(wdAmount),ccy:wdCcy,notes:wdNotes,status:"Pending"};
+    // Write to Google Sheets
+    const result=await appendToSheet(row);
+    // Always save locally regardless of Sheets result
+    const all=await loadRequests();
+    const updated=[newReq,...all];
+    await saveRequests(updated);
+    setWdRequests([newReq,...wdRequests]);
+    if(!result.ok&&result.error==="not_configured"){
+      setWdError("⚠ Google Sheets not configured — request saved locally only. See setup guide.");
+    }
+    setWdSubmitting(false);
+    if(result.ok||result.error==="not_configured"){
+      setShowWD(false);setWdAmount("");setWdNotes("");setWdType("PCLS");setWdCcy("GBP");
+    }
+  };
+
+  const clientWdRequests=wdRequests.filter(r=>r.clientId===clientId);
   const txTypes=[...new Set(clientTxns.map(t=>t.txtype))].sort();
   const tickers=[...new Set(clientTxns.map(t=>t.ticker))].sort();
 
@@ -549,9 +665,10 @@ const ClientDetail=({clientId,onBack,selectedCcy})=>{
             <div style={{marginTop:5,display:"flex",gap:5}}><Badge color="success">Verified</Badge><Badge color="navy">{client.jurisdiction}</Badge></div>
           </div>
         </div>
-        <div style={{display:"flex",gap:7}}>
+        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
           <Btn onClick={()=>setShowEmail(true)} variant="ghost">✉ Email</Btn>
           <Btn onClick={()=>setShowLog(true)} variant="secondary">+ Log</Btn>
+          <Btn onClick={()=>setShowWD(true)} variant="dark">↓ Withdrawal</Btn>
         </div>
       </div>
 
@@ -710,7 +827,7 @@ const ClientDetail=({clientId,onBack,selectedCcy})=>{
           <div style={{background:C.white,border:`0.5px solid ${C.silver}`,borderRadius:10,overflow:"hidden"}}>
             <div style={{padding:"12px 16px",borderBottom:`0.5px solid ${C.silver}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{fontSize:13,fontWeight:600,color:C.navy}}>Communication log</div>
-              <div style={{display:"flex",gap:6}}><Btn small onClick={()=>setShowEmail(true)} variant="ghost">✉ Email</Btn><Btn small onClick={()=>setShowLog(true)} variant="secondary">+ Log</Btn></div>
+              <div style={{display:"flex",gap:6}}><Btn small onClick={()=>setShowEmail(true)} variant="ghost">✉ Email</Btn><Btn small onClick={()=>setShowLog(true)} variant="secondary">+ Log</Btn><Btn small onClick={()=>setShowWD(true)} variant="dark">↓ WD</Btn></div>
             </div>
             <div style={{padding:"0 16px"}}>
               {comms.map((c,i)=>(
@@ -731,6 +848,103 @@ const ClientDetail=({clientId,onBack,selectedCcy})=>{
         </div>
       )}
 
+      {/* ── WITHDRAWAL REQUESTS PANEL (shown in valuation tab) ── */}
+      {tab==="valuation"&&clientWdRequests.length>0&&(
+        <div style={{background:C.white,border:`0.5px solid ${C.silver}`,borderRadius:10,overflow:"hidden",marginTop:14}}>
+          <div style={{padding:"12px 16px",borderBottom:`0.5px solid ${C.silver}`,display:"flex",justifyContent:"space-between",alignItems:"center",background:"#FAFBFC"}}>
+            <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:13,fontWeight:600,color:C.navy}}>Withdrawal requests</div>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              {statusLoading&&<span style={{fontSize:11,color:C.faint}}>Syncing...</span>}
+              <Btn small variant="ghost" onClick={refreshStatuses}>⟳ Refresh status</Btn>
+              <Badge color={clientWdRequests.filter(r=>r.status==="Pending").length>0?"warning":"success"}>
+                {clientWdRequests.filter(r=>r.status==="Pending").length} pending
+              </Badge>
+            </div>
+          </div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead><tr style={{background:C.silver}}>
+              {["Request ID","Date","Type","Amount","CCY","Notes","Status"].map(h=>(
+                <th key={h} style={{padding:"8px 14px",textAlign:"left",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase"}}>{h}</th>
+              ))}
+            </tr></thead>
+            <tbody>
+              {clientWdRequests.map((r,i)=>{
+                const live=wdStatusMap[r.id]||r.status;
+                const isActioned=live==="Actioned"||live==="Completed";
+                const isCancelled=live==="Cancelled";
+                return(
+                  <tr key={r.id} style={{borderBottom:`0.5px solid ${C.silver}`,background:i%2===0?C.white:"#FAFBFC"}}>
+                    <td style={{padding:"9px 14px",fontFamily:"monospace",fontSize:11,color:C.faint}}>{r.id}</td>
+                    <td style={{padding:"9px 14px",color:C.text}}>{r.date}</td>
+                    <td style={{padding:"9px 14px",fontWeight:600,color:C.navy}}>{r.type}</td>
+                    <td style={{padding:"9px 14px",fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,color:C.navy}}>
+                      {r.ccy==="GBP"?"£":"$"}{fmt(r.amount)}
+                    </td>
+                    <td style={{padding:"9px 14px"}}><Badge color={r.ccy==="GBP"?"navy":"info"}>{r.ccy}</Badge></td>
+                    <td style={{padding:"9px 14px",color:C.text,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.notes||"—"}</td>
+                    <td style={{padding:"9px 14px"}}>
+                      <Badge color={isActioned?"success":isCancelled?"error":"warning"}>
+                        {isActioned?"✓ Actioned":isCancelled?"Cancelled":"⏳ Pending"}
+                      </Badge>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!sheetsConfigured()&&(
+            <div style={{padding:"10px 14px",background:C.amberBg,borderTop:`0.5px solid ${C.silver}`,fontSize:11,color:C.amber}}>
+              ⚠ Google Sheets not connected — statuses shown from local storage only. Connect Sheets to enable live status sync.
+            </div>
+          )}
+        </div>
+      )}
+
+      {showWD&&(
+        <Modal title="Withdrawal request" onClose={()=>{setShowWD(false);setWdError("");}}>
+          <div style={{background:C.navy,borderRadius:8,padding:"12px 16px",marginBottom:18,display:"flex",gap:14,alignItems:"center"}}>
+            <div style={{width:36,height:36,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:14,fontWeight:700,flexShrink:0}}>{initials}</div>
+            <div>
+              <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:14,fontWeight:600,color:C.white}}>{client.name}</div>
+              <div style={{fontSize:11,color:"rgba(255,255,255,0.45)",marginTop:2}}>{client.id} · {client.email}</div>
+            </div>
+          </div>
+          <FldSelect label="Withdrawal type" value={wdType} onChange={setWdType} options={[
+            {value:"PCLS",label:"PCLS — Pension Commencement Lump Sum"},
+            {value:"Regular Withdrawal",label:"Regular withdrawal"},
+            {value:"Drawdown",label:"Drawdown"},
+            {value:"Flexi-Access Drawdown",label:"Flexi-access drawdown"},
+            {value:"UFPLS",label:"UFPLS — Uncrystallised Fund Pension Lump Sum"},
+            {value:"Full Surrender",label:"Full surrender"},
+            {value:"Partial Surrender",label:"Partial surrender"},
+            {value:"Ad Hoc",label:"Ad hoc withdrawal"},
+          ]}/>
+          <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:12}}>
+            <FldInput label="Amount requested" value={wdAmount} onChange={setWdAmount} placeholder="e.g. 5000.00" type="number"/>
+            <FldSelect label="Currency" value={wdCcy} onChange={setWdCcy} options={[
+              {value:"GBP",label:"GBP £"},
+              {value:"USD",label:"USD $"},
+              {value:"EUR",label:"EUR €"},
+              {value:"CNY",label:"CNY ¥"},
+            ]}/>
+          </div>
+          <div style={{marginBottom:14}}>
+            <label style={{fontSize:11,fontWeight:600,color:C.text,display:"block",marginBottom:4}}>Notes / instructions (optional)</label>
+            <textarea value={wdNotes} onChange={e=>setWdNotes(e.target.value)} rows={3}
+              placeholder="e.g. Transfer to Barclays account ending 4821. Client confirmed verbally on call."
+              style={{width:"100%",padding:"8px 11px",border:`1.5px solid ${C.silverMid}`,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",resize:"vertical",boxSizing:"border-box"}}/>
+          </div>
+          <div style={{background:C.silver,borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:12,color:C.text,lineHeight:1.7}}>
+            <strong style={{display:"block",marginBottom:4,color:C.navy}}>What happens next</strong>
+            This request will be written to your Google Sheets withdrawal log with status <strong>Pending</strong>. Back-office will see it in the spreadsheet, action it, and update the Status column to <strong>Actioned</strong>. Click ⟳ Refresh status to sync.
+          </div>
+          {wdError&&<div style={{background:C.amberBg,border:`1px solid ${C.gold}`,borderRadius:6,padding:"10px 12px",fontSize:12,color:C.amber,marginBottom:14}}>{wdError}</div>}
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <Btn variant="secondary" onClick={()=>{setShowWD(false);setWdError("");}}>Cancel</Btn>
+            <Btn onClick={submitWithdrawal} variant="dark">{wdSubmitting?"Submitting...":"Submit request →"}</Btn>
+          </div>
+        </Modal>
+      )}
       {showEmail&&<Modal title={`Email ${client.name}`} onClose={()=>setShowEmail(false)}><div style={{fontSize:12,color:C.faint,marginBottom:14}}>To: {client.email}</div><FldInput label="Subject" value={emailSubject} onChange={setEmailSubject} placeholder="e.g. Q2 Portfolio Review"/><div style={{marginBottom:13}}><label style={{fontSize:11,fontWeight:600,color:C.text,display:"block",marginBottom:4}}>Message</label><textarea value={emailBody} onChange={e=>setEmailBody(e.target.value)} rows={5} style={{width:"100%",padding:"8px 11px",border:`1.5px solid ${C.silverMid}`,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",resize:"vertical",boxSizing:"border-box"}}/></div><div style={{display:"flex",gap:7,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>setShowEmail(false)}>Cancel</Btn><Btn onClick={sendEmail}>Send email</Btn></div></Modal>}
       {showLog&&<Modal title="Log communication" onClose={()=>setShowLog(false)}><FldSelect label="Type" value={logType} onChange={setLogType} options={[{value:"call",label:"Phone call"},{value:"email",label:"Email"},{value:"meeting",label:"Meeting"},{value:"note",label:"Internal note"}]}/><div style={{marginBottom:13}}><label style={{fontSize:11,fontWeight:600,color:C.text,display:"block",marginBottom:4}}>Notes</label><textarea value={logNote} onChange={e=>setLogNote(e.target.value)} rows={4} style={{width:"100%",padding:"8px 11px",border:`1.5px solid ${C.silverMid}`,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",resize:"vertical",boxSizing:"border-box"}}/></div><div style={{display:"flex",gap:7,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>setShowLog(false)}>Cancel</Btn><Btn onClick={logComm}>Save</Btn></div></Modal>}
     </div>
@@ -1247,6 +1461,197 @@ const Connect=()=>{
   );
 };
 
+// ─── WITHDRAWALS PAGE ─────────────────────────────────────────────
+const WithdrawalsPage=()=>{
+  const isMobile=useIsMobile();
+  const [requests,setRequests]=useState([]);
+  const [statusMap,setStatusMap]=useState({});
+  const [loading,setLoading]=useState(true);
+  const [syncing,setSyncing]=useState(false);
+  const [filter,setFilter]=useState("all");
+  const [showSetup,setShowSetup]=useState(false);
+  const [sheetId,setSheetId]=useState(SHEETS_CONFIG.SPREADSHEET_ID);
+  const [apiKey,setApiKey]=useState(SHEETS_CONFIG.API_KEY);
+
+  useEffect(()=>{
+    loadRequests().then(r=>{setRequests(r);setLoading(false);});
+  },[]);
+
+  const syncStatuses=async()=>{
+    setSyncing(true);
+    const map=await readSheetStatuses();
+    setStatusMap(map);
+    if(Object.keys(map).length>0){
+      const updated=requests.map(r=>map[r.id]?{...r,status:map[r.id]}:r);
+      await saveRequests(updated);
+      setRequests(updated);
+    }
+    setSyncing(false);
+  };
+
+  const filtered=filter==="all"?requests:requests.filter(r=>{
+    const live=statusMap[r.id]||r.status;
+    if(filter==="pending") return live==="Pending";
+    if(filter==="actioned") return live==="Actioned"||live==="Completed";
+    return true;
+  });
+
+  const pendingCount=requests.filter(r=>(statusMap[r.id]||r.status)==="Pending").length;
+
+  const exportCSV=()=>{
+    const header="Request ID,Date,Client ID,Client Name,Type,Amount,CCY,Notes,Status
+";
+    const rows=requests.map(r=>[r.id,r.date,r.clientId,r.clientName,r.type,r.amount,r.ccy,(r.notes||"").replace(/,/g,";"),statusMap[r.id]||r.status].join(",")).join("
+");
+    const blob=new Blob([header+rows],{type:"text/csv"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="i-convergence-withdrawals.csv";a.click();
+  };
+
+  return(
+    <div style={{padding:isMobile?"12px 10px":24}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:12}}>
+        <div>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:3}}>Back-office</div>
+          <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:22,fontWeight:600,color:C.navy,display:"flex",alignItems:"center",gap:10}}>
+            Withdrawal requests
+            {pendingCount>0&&<span style={{background:C.amberBg,color:C.amber,fontSize:13,fontWeight:700,padding:"2px 10px",borderRadius:100}}>{pendingCount} pending</span>}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <Btn small variant="ghost" onClick={exportCSV}>↓ Export CSV</Btn>
+          <Btn small variant="secondary" onClick={()=>setShowSetup(true)}>⚙ Sheets setup</Btn>
+          <Btn small onClick={syncStatuses}>{syncing?"Syncing...":"⟳ Sync from Sheets"}</Btn>
+        </div>
+      </div>
+
+      {/* Config status banner */}
+      {!sheetsConfigured()&&(
+        <div style={{background:C.amberBg,border:`1px solid ${C.gold}`,borderRadius:10,padding:"14px 18px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center",gap:12,flexWrap:"wrap"}}>
+          <div>
+            <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:13,fontWeight:600,color:C.amber,marginBottom:3}}>⚠ Google Sheets not connected</div>
+            <div style={{fontSize:12,color:C.text,lineHeight:1.6}}>Withdrawal requests are saved locally. Connect Google Sheets so your back-office team sees requests in a live spreadsheet and can update statuses.</div>
+          </div>
+          <Btn small variant="dark" onClick={()=>setShowSetup(true)}>Connect now →</Btn>
+        </div>
+      )}
+      {sheetsConfigured()&&(
+        <div style={{background:C.tealLight,border:`1px solid ${C.teal}`,borderRadius:10,padding:"12px 16px",marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:C.teal,flexShrink:0}}/>
+          <div style={{fontSize:13,color:C.tealMid}}>Connected to Google Sheets · Status updates sync when you click <strong>⟳ Sync</strong></div>
+        </div>
+      )}
+
+      {/* Filter tabs */}
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        {[["all","All"],["pending","Pending"],["actioned","Actioned"]].map(([k,l])=>(
+          <button key={k} onClick={()=>setFilter(k)} style={{background:filter===k?C.navy:C.white,color:filter===k?C.white:C.text,border:`0.5px solid ${filter===k?C.navy:C.silver}`,borderRadius:6,padding:"6px 14px",fontSize:12,cursor:"pointer",fontFamily:"'Inter',sans-serif",fontWeight:filter===k?600:400}}>
+            {l}{k==="pending"&&pendingCount>0?` (${pendingCount})`:""}
+          </button>
+        ))}
+      </div>
+
+      {loading?(
+        <div style={{padding:40,textAlign:"center",color:C.faint}}>Loading requests...</div>
+      ):filtered.length===0?(
+        <div style={{background:C.white,border:`0.5px solid ${C.silver}`,borderRadius:10,padding:40,textAlign:"center"}}>
+          <div style={{fontSize:32,marginBottom:12}}>↓</div>
+          <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:16,fontWeight:600,color:C.navy,marginBottom:6}}>No withdrawal requests</div>
+          <div style={{fontSize:13,color:C.faint}}>Requests submitted from client profiles will appear here.</div>
+        </div>
+      ):(
+        <div style={{background:C.white,border:`0.5px solid ${C.silver}`,borderRadius:10,overflow:"hidden"}}>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead><tr style={{background:C.navy}}>
+                {["Request ID","Date","Client","Type","Amount","CCY","Notes","Status"].map(h=>(
+                  <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.6)",letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {filtered.map((r,i)=>{
+                  const live=statusMap[r.id]||r.status;
+                  const isActioned=live==="Actioned"||live==="Completed";
+                  const isCancelled=live==="Cancelled";
+                  const isPending=!isActioned&&!isCancelled;
+                  return(
+                    <tr key={r.id} style={{borderBottom:`0.5px solid ${C.silver}`,background:i%2===0?C.white:"#FAFBFC"}}>
+                      <td style={{padding:"9px 14px",fontFamily:"monospace",fontSize:11,color:C.faint}}>{r.id}</td>
+                      <td style={{padding:"9px 14px",color:C.text,whiteSpace:"nowrap"}}>{r.date}</td>
+                      <td style={{padding:"9px 14px",fontWeight:500,color:C.navy,whiteSpace:"nowrap"}}>{r.clientName}</td>
+                      <td style={{padding:"9px 14px",fontWeight:600,color:C.navy}}>{r.type}</td>
+                      <td style={{padding:"9px 14px",fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,color:C.navy,textAlign:"right"}}>
+                        {r.ccy==="GBP"?"£":r.ccy==="EUR"?"€":r.ccy==="CNY"?"¥":"$"}{fmt(r.amount)}
+                      </td>
+                      <td style={{padding:"9px 14px"}}><Badge color={r.ccy==="GBP"?"navy":"info"}>{r.ccy}</Badge></td>
+                      <td style={{padding:"9px 14px",color:C.text,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.notes||"—"}</td>
+                      <td style={{padding:"9px 14px"}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <Badge color={isActioned?"success":isCancelled?"error":"warning"}>
+                            {isActioned?"✓ Actioned":isCancelled?"Cancelled":"⏳ Pending"}
+                          </Badge>
+                          {isPending&&sheetsConfigured()&&<span style={{fontSize:10,color:C.faint}}>update in Sheets</span>}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{padding:"10px 14px",borderTop:`0.5px solid ${C.silver}`,background:"#FAFBFC",fontSize:11,color:C.faint}}>
+            {filtered.length} request{filtered.length!==1?"s":""} · To update a status, change the "Status" column in your Google Sheet, then click ⟳ Sync
+          </div>
+        </div>
+      )}
+
+      {/* Google Sheets Setup Modal */}
+      {showSetup&&(
+        <Modal title="Google Sheets setup" onClose={()=>setShowSetup(false)} wide>
+          <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:20,marginBottom:20}}>
+            <div>
+              <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:15,fontWeight:600,color:C.navy,marginBottom:12}}>Step 1 — Create your spreadsheet</div>
+              <div style={{fontSize:12,color:C.text,lineHeight:1.8}}>
+                <div style={{marginBottom:6}}>1. Go to <strong>sheets.google.com</strong> and create a new sheet.</div>
+                <div style={{marginBottom:6}}>2. Rename the first tab to <strong>Withdrawals</strong>.</div>
+                <div style={{marginBottom:6}}>3. Add these headers in row 1:</div>
+                <div style={{background:C.silver,borderRadius:6,padding:"8px 10px",fontFamily:"monospace",fontSize:11,marginBottom:8,lineHeight:1.9}}>
+                  A: Request ID<br/>B: Date<br/>C: Client ID<br/>D: Client Name<br/>E: Withdrawal Type<br/>F: Amount<br/>G: CCY<br/>H: Notes<br/>I: Requested By<br/>J: Status
+                </div>
+                <div style={{marginBottom:6}}>4. Share the sheet with your back-office team (Viewer or Editor access).</div>
+                <div>5. Copy the <strong>Spreadsheet ID</strong> from the URL:<br/><span style={{fontFamily:"monospace",fontSize:11,background:C.silver,padding:"2px 6px",borderRadius:4}}>docs.google.com/spreadsheets/d/<strong>[ID HERE]</strong>/edit</span></div>
+              </div>
+            </div>
+            <div>
+              <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:15,fontWeight:600,color:C.navy,marginBottom:12}}>Step 2 — Create an API key</div>
+              <div style={{fontSize:12,color:C.text,lineHeight:1.8}}>
+                <div style={{marginBottom:6}}>1. Go to <strong>console.cloud.google.com</strong></div>
+                <div style={{marginBottom:6}}>2. Create a new project (or use existing).</div>
+                <div style={{marginBottom:6}}>3. Enable the <strong>Google Sheets API</strong>.</div>
+                <div style={{marginBottom:6}}>4. Go to <strong>APIs &amp; Services -&gt; Credentials</strong> → Create credentials → <strong>API Key</strong>.</div>
+                <div style={{marginBottom:6}}>5. Restrict the key to the <strong>Google Sheets API</strong> only (security best practice).</div>
+                <div style={{marginBottom:6}}>6. <strong>Important:</strong> Set the sheet sharing to <strong>"Anyone with the link can view"</strong> so the API key can read statuses without OAuth.</div>
+                <div style={{background:C.amberBg,borderRadius:6,padding:"8px 10px",fontSize:11,color:C.amber,marginTop:8}}>Note: API keys are visible in the browser. Only enable Sheets API access, and consider IP restrictions for production use.</div>
+              </div>
+            </div>
+          </div>
+          <div style={{borderTop:`0.5px solid ${C.silver}`,paddingTop:18}}>
+            <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:15,fontWeight:600,color:C.navy,marginBottom:14}}>Step 3 — Enter your credentials</div>
+            <FldInput label="Spreadsheet ID" value={sheetId} onChange={setSheetId} placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"/>
+            <FldInput label="API Key" value={apiKey} onChange={setApiKey} placeholder="AIzaSy..."/>
+            <div style={{background:C.silver,borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:12,color:C.text,lineHeight:1.7}}>
+              After saving, paste these values into the <strong>SHEETS_CONFIG</strong> object at the top of the source code (lines 44–46) for the connection to persist across sessions. The fields above update the config for this session only.
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <Btn variant="secondary" onClick={()=>setShowSetup(false)}>Close</Btn>
+              <Btn onClick={()=>{SHEETS_CONFIG.SPREADSHEET_ID=sheetId;SHEETS_CONFIG.API_KEY=apiKey;setShowSetup(false);}}>Save for this session</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
 // ─── ROOT ──────────────────────────────────────────────────────────
 export default function App(){
   const [section,setSection]=useState("dashboard");
@@ -1256,10 +1661,24 @@ export default function App(){
 
   const handleSection=(s)=>{setSection(s);if(s!=="clients")setSelectedClient(null);};
 
+  // Inject global styles once on mount
+  useEffect(()=>{
+    const style=document.createElement("style");
+    style.innerHTML=`
+      @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+      *{box-sizing:border-box;}
+      body{overflow-x:hidden;margin:0;padding:0;}
+    `;
+    style.id="iconv-global";
+    if(!document.getElementById("iconv-global")) document.head.appendChild(style);
+    return ()=>{
+      const el=document.getElementById("iconv-global");
+      if(el) el.remove();
+    };
+  },[]);
+
   return(
     <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
-      <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet"/>
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}} * {box-sizing:border-box;} body{overflow-x:hidden;}`}</style>
       <Nav section={section} setSection={handleSection} selectedCcy={selectedCcy} setCcy={setSelectedCcy}/>
       <div style={{flex:1,overflowY:"auto",paddingBottom:isMobile?68:0}}>
         {section==="dashboard"&&<Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy}/>}
@@ -1267,6 +1686,7 @@ export default function App(){
         {section==="transactions"&&<Transactions selectedCcy={selectedCcy}/>}
         {section==="pricing"&&<Pricing selectedCcy={selectedCcy}/>}
         {section==="valuations"&&<Valuations setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy}/>}
+        {section==="withdrawals"&&<WithdrawalsPage/>}
         {section==="news"&&<News/>}
         {section==="connect"&&<Connect/>}
       </div>
