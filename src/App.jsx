@@ -1555,7 +1555,9 @@ const SUGGESTED_PROMPTS = [
   "What would a rebalance look like for Lyndsey Starkie?",
 ];
 
-const ANTHROPIC_API_KEY = ""; // Paste your key: sk-ant-...
+// API key — reads from Vite env var in production, empty string in artifact preview
+// API key — injected via window.__ANTHROPIC_KEY in index.html for Vercel deployment
+const ANTHROPIC_API_KEY = (typeof window !== "undefined" && window.__ANTHROPIC_KEY) ? window.__ANTHROPIC_KEY : "";
 
 const buildPortfolioContext = (selectedClient) => {
   const clientSummaries = CLIENTS.map(c => {
