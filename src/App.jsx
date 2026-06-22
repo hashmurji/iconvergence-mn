@@ -1,5 +1,167 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid, AreaChart, Area } from "recharts";
+
+// ─── AUTH0 CONFIG ────────────────────────────────────────────────────────────
+const AUTH0_DOMAIN = "iconvergence.uk.auth0.com";
+const AUTH0_CLIENT_ID = "jWc8OqcK0Vw77Z1sIYQOr7BNviukmrbp";
+const AUTH0_REDIRECT_URI = typeof window !== "undefined" ? window.location.origin : "";
+const AUTH0_AUDIENCE = "https://"+AUTH0_DOMAIN+"/api/v2/";
+
+// ─── SIMPLE AUTH0 HOOK (no SDK dependency) ───────────────────────────────────
+// Uses Auth0 Universal Login + PKCE flow - no SDK needed
+const generateCodeVerifier = () => {
+  const array = new Uint8Array(32);
+  crypto.getRandomValues(array);
+  return btoa(String.fromCharCode(...array)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=/g,"");
+};
+const generateCodeChallenge = async (verifier) => {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(verifier);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=/g,"");
+};
+
+const useAuth = () => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Get stored tokens
+  const getStoredAuth = () => {
+    try {
+      const stored = sessionStorage.getItem("iconv_auth");
+      return stored ? JSON.parse(stored) : null;
+    } catch(e) { return null; }
+  };
+
+  const decodeJWT = (token) => {
+    try {
+      const base64 = token.split(".")[1].replace(/-/g,"+").replace(/_/g,"/");
+      const decoded = JSON.parse(atob(base64));
+      return decoded;
+    } catch(e) { return null; }
+  };
+
+  const getUserFromToken = (idToken, accessToken) => {
+    const decoded = decodeJWT(idToken);
+    if (!decoded) return null;
+    // Extract roles from Auth0 namespace claim
+    const roles = decoded["https://iconvergence.co.uk/roles"] || 
+                  decoded["https://iconvergence.uk.auth0.com/roles"] || [];
+    // Extract client_id from app_metadata
+    const clientId = decoded["https://iconvergence.co.uk/client_id"] ||
+                     decoded["https://iconvergence.uk.auth0.com/client_id"] || null;
+    return {
+      sub: decoded.sub,
+      email: decoded.email,
+      name: decoded.name || decoded.email,
+      picture: decoded.picture,
+      roles,
+      clientId,
+      isAdviser: roles.includes("adviser") || roles.length === 0, // default to adviser if no role set
+      isClient: roles.includes("client"),
+      idToken,
+      accessToken,
+    };
+  };
+
+  // Handle Auth0 callback (code exchange)
+  const handleCallback = async () => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const state = params.get("state");
+    const storedState = sessionStorage.getItem("auth0_state");
+    const verifier = sessionStorage.getItem("auth0_verifier");
+
+    if (!code || !verifier) return false;
+    if (state !== storedState) { setError("Invalid state"); return false; }
+
+    try {
+      const response = await fetch("https://"+AUTH0_DOMAIN+"/oauth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          grant_type: "authorization_code",
+          client_id: AUTH0_CLIENT_ID,
+          code_verifier: verifier,
+          code,
+          redirect_uri: AUTH0_REDIRECT_URI,
+        }),
+      });
+
+      const tokens = await response.json();
+      if (tokens.error) { setError(tokens.error_description); return false; }
+
+      const authData = {
+        idToken: tokens.id_token,
+        accessToken: tokens.access_token,
+        expiresAt: Date.now() + (tokens.expires_in * 1000),
+      };
+      sessionStorage.setItem("iconv_auth", JSON.stringify(authData));
+      sessionStorage.removeItem("auth0_state");
+      sessionStorage.removeItem("auth0_verifier");
+
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return authData;
+    } catch(e) { setError("Login failed: "+e.message); return false; }
+  };
+
+  useEffect(() => {
+    const init = async () => {
+      setLoading(true);
+      // Check if returning from Auth0
+      if (window.location.search.includes("code=")) {
+        const authData = await handleCallback();
+        if (authData) {
+          const u = getUserFromToken(authData.idToken, authData.accessToken);
+          setUser(u);
+        }
+      } else {
+        // Check stored session
+        const stored = getStoredAuth();
+        if (stored && stored.expiresAt > Date.now()) {
+          const u = getUserFromToken(stored.idToken, stored.accessToken);
+          setUser(u);
+        }
+      }
+      setLoading(false);
+    };
+    init();
+  }, []);
+
+  const login = async () => {
+    const verifier = generateCodeVerifier();
+    const challenge = await generateCodeChallenge(verifier);
+    const state = generateCodeVerifier();
+    sessionStorage.setItem("auth0_verifier", verifier);
+    sessionStorage.setItem("auth0_state", state);
+
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: AUTH0_CLIENT_ID,
+      redirect_uri: AUTH0_REDIRECT_URI,
+      scope: "openid profile email",
+      state,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      // Force MFA
+      acr_values: "http://schemas.openid.net/pape/policies/2007/06/multi-factor",
+    });
+
+    window.location.href = "https://"+AUTH0_DOMAIN+"/authorize?"+params.toString();
+  };
+
+  const logout = () => {
+    sessionStorage.removeItem("iconv_auth");
+    setUser(null);
+    window.location.href = "https://"+AUTH0_DOMAIN+"/v2/logout?client_id="+AUTH0_CLIENT_ID+"&returnTo="+encodeURIComponent(AUTH0_REDIRECT_URI);
+  };
+
+  return { user, loading, error, login, logout };
+};
+
+
 // ─── MOBILE HOOK ─────────────────────────────────────────────────
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
@@ -335,7 +497,7 @@ const CCYSelector=({selectedCcy,onChange,compact})=>(
   </div>
 );
 
-const Nav=({section,setSection,selectedCcy,setCcy})=>{
+const Nav=({section,setSection,selectedCcy,setCcy,user,logout})=>{
   const isMobile=useIsMobile();
   const [menuOpen,setMenuOpen]=useState(false);
   const items=[
@@ -346,6 +508,7 @@ const Nav=({section,setSection,selectedCcy,setCcy})=>{
     {key:"ai",label:"AI Insights",icon:"✦"},
     {key:"news",label:"News",icon:"📡"},
     {key:"connect",label:"Connect",icon:"⚡"},
+    {key:"users",label:"Users",icon:"👤"},
   ];
   const handleNav=(key)=>{setSection(key);setMenuOpen(false);};
   return(
@@ -368,7 +531,12 @@ const Nav=({section,setSection,selectedCcy,setCcy})=>{
               <span style={{fontSize:11,color:"rgba(255,255,255,0.4)"}}>Bloomberg</span>
             </div>
           </>}
-          <div style={{width:32,height:32,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:12,fontWeight:600,flexShrink:0}}>JW</div>
+          <div style={{position:"relative"}}>
+            <div style={{width:32,height:32,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:12,fontWeight:600,flexShrink:0,cursor:"pointer"}} title={user&&user.email}>
+              {user?user.name.split(" ").map(n=>n[0]).join("").slice(0,2):"?"}
+            </div>
+          </div>
+          {!isMobile&&user&&<button onClick={logout} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",color:"rgba(255,255,255,0.6)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>Sign out</button>}
           {isMobile&&(
             <button onClick={()=>setMenuOpen(o=>!o)} style={{background:"none",border:"none",cursor:"pointer",padding:6,display:"flex",flexDirection:"column",gap:5,width:36,height:36,alignItems:"center",justifyContent:"center"}}>
               <div style={{width:22,height:2,background:C.white,transition:"transform 0.2s",transform:menuOpen?"rotate(45deg) translate(0,7px)":"none"}}/>
@@ -629,7 +797,7 @@ const buildDefaultAlerts = () => [
 ];
 
 // ─── CLIENT DETAIL ─────────────────────────────────────────────────
-const ClientDetail=({clientId,onBack,selectedCcy})=>{
+const ClientDetail=({clientId,onBack,selectedCcy,setPreviewClientId})=>{
   const isMobile=useIsMobile();
   const [tab,setTab]=useState("valuation");
   // Email/Log state
@@ -718,6 +886,7 @@ const ClientDetail=({clientId,onBack,selectedCcy})=>{
           <Btn onClick={()=>setShowEmail(true)} variant="ghost" small={isMobile}>✉ Email</Btn>
           <Btn onClick={()=>setShowLog(true)} variant="secondary" small={isMobile}>+ Log</Btn>
           <Btn onClick={()=>setShowWD(true)} variant="dark" small={isMobile}>↓ Withdrawal</Btn>
+          {setPreviewClientId&&<Btn onClick={()=>setPreviewClientId(clientId)} variant="secondary" small={isMobile}>👁 Client view</Btn>}
           <Btn onClick={()=>setShowDocs(true)} variant="secondary" small={isMobile}>📁 Docs</Btn>
         </div>
       </div>
@@ -1087,13 +1256,13 @@ const ClientDetail=({clientId,onBack,selectedCcy})=>{
 };
 
 
-const ClientsList=({selectedClient,setSelectedClient,selectedCcy})=>{
+const ClientsList=({selectedClient,setSelectedClient,selectedCcy,setPreviewClientId})=>{
   const [search,setSearch]=useState("");
   const [showAdd,setShowAdd]=useState(false);
   const [clients,setClients]=useState(CLIENTS);
   const [newC,setNewC]=useState({name:"",email:"",address:"",jurisdiction:"US"});
   const sym=CCY_SYMBOLS[selectedCcy]||"$";
-  if(selectedClient) return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy}/>;
+  if(selectedClient) return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy} setPreviewClientId={setPreviewClientId}/>;
   const filtered=clients.filter(c=>c.name.toLowerCase().includes(search.toLowerCase())||c.email.toLowerCase().includes(search.toLowerCase())||c.id.includes(search));
   const addClient=()=>{const id=`C00${Date.now().toString().slice(-6)}`;setClients([...clients,{...newC,id,code:`${id.slice(1)}-${newC.name.split(" ")[1]||"New"}`,verified:false,phone:"",joined:new Date().toISOString().slice(0,10)}]);setShowAdd(false);setNewC({name:"",email:"",address:"",jurisdiction:"US"});};
   return(
@@ -2267,30 +2436,363 @@ const WithdrawalsPage=()=>{
 };
 
 
+// ─── LOGIN SCREEN ────────────────────────────────────────────────────────────
+const LoginScreen = ({ onLogin, loading, error }) => (
+  <div style={{minHeight:"100vh",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+    <div style={{width:"100%",maxWidth:400}}>
+      {/* Logo */}
+      <div style={{textAlign:"center",marginBottom:40}}>
+        <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:42,fontWeight:700,color:C.white,letterSpacing:-1,marginBottom:8}}>
+          <span style={{color:C.teal}}>i-</span>Convergence
+        </div>
+        <div style={{fontSize:13,color:"rgba(255,255,255,0.4)",letterSpacing:2,textTransform:"uppercase"}}>Platform Management System</div>
+      </div>
+
+      {/* Login card */}
+      <div style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:16,padding:36}}>
+        <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:20,fontWeight:600,color:C.white,marginBottom:6}}>Sign in</div>
+        <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",marginBottom:28,lineHeight:1.6}}>
+          Secure access with multi-factor authentication. You will be redirected to our identity provider.
+        </div>
+
+        {error && (
+          <div style={{background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"12px 14px",marginBottom:20,fontSize:13,color:"#FCA5A5"}}>
+            {error}
+          </div>
+        )}
+
+        <button onClick={onLogin} disabled={loading} style={{width:"100%",background:C.teal,color:C.white,border:"none",borderRadius:8,padding:"14px",fontSize:15,fontWeight:600,cursor:loading?"wait":"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:10,opacity:loading?0.7:1,transition:"opacity 0.2s"}}>
+          {loading ? (
+            <>
+              <div style={{width:18,height:18,border:"2px solid rgba(255,255,255,0.3)",borderTop:"2px solid white",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+              Connecting...
+            </>
+          ) : (
+            <>
+              <span style={{fontSize:18}}>🔐</span>
+              Continue with MFA
+            </>
+          )}
+        </button>
+
+        <div style={{marginTop:24,paddingTop:20,borderTop:"1px solid rgba(255,255,255,0.08)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+            <div style={{width:6,height:6,borderRadius:"50%",background:C.teal,flexShrink:0}}/>
+            <span style={{fontSize:12,color:"rgba(255,255,255,0.35)"}}>Multi-factor authentication required</span>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+            <div style={{width:6,height:6,borderRadius:"50%",background:C.teal,flexShrink:0}}/>
+            <span style={{fontSize:12,color:"rgba(255,255,255,0.35)"}}>Role-based access control</span>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:6,height:6,borderRadius:"50%",background:C.teal,flexShrink:0}}/>
+            <span style={{fontSize:12,color:"rgba(255,255,255,0.35)"}}>Session expires after 8 hours</span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{textAlign:"center",marginTop:24,fontSize:11,color:"rgba(255,255,255,0.2)"}}>
+        i-Convergence Financial Platform · Powered by Auth0
+      </div>
+    </div>
+    <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+  </div>
+);
+
+// ─── CLIENT PORTAL ───────────────────────────────────────────────────────────
+const ClientPortal = ({ user, logout, selectedCcy, setCcy, previewClientId }) => {
+  const isMobile = useIsMobile();
+  const clientId = previewClientId || user.clientId;
+  const client = CLIENTS.find(c => c.id === clientId);
+  const sym = CCY_SYMBOLS[selectedCcy] || "$";
+  const holdings = HOLDINGS[clientId] || [];
+  const totals = clientTotals(clientId, selectedCcy);
+  const chartData = buildChart(clientId, selectedCcy);
+  const equityH = holdings.filter(h => !h.isCash);
+  const cashH = holdings.filter(h => h.isCash);
+
+  if (!client) return (
+    <div style={{minHeight:"100vh",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{color:C.white,fontSize:16,textAlign:"center"}}>
+        <div style={{fontSize:32,marginBottom:16}}>⚠</div>
+        <div>No portfolio linked to this account.</div>
+        <div style={{fontSize:13,color:"rgba(255,255,255,0.4)",marginTop:8}}>Please contact your adviser.</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh"}}>
+      {/* Client portal nav */}
+      <div style={{background:C.navy,padding:"0 20px",height:54,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100,borderBottom:"1px solid rgba(0,184,176,0.15)"}}>
+        <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:18,fontWeight:700,color:C.white}}>
+          <span style={{color:C.teal}}>i-</span>Convergence
+          {previewClientId && <span style={{fontSize:11,background:C.gold,color:C.navy,padding:"2px 8px",borderRadius:4,marginLeft:10,fontFamily:"'Inter',sans-serif",fontWeight:600}}>PREVIEW MODE</span>}
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <CCYSelector selectedCcy={selectedCcy} onChange={setCcy} compact={isMobile}/>
+          <div style={{fontSize:13,color:"rgba(255,255,255,0.5)"}}>
+            {previewClientId ? "Adviser preview" : (user && user.name)}
+          </div>
+          {!previewClientId && (
+            <button onClick={logout} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",color:"rgba(255,255,255,0.6)",borderRadius:6,padding:"5px 12px",fontSize:12,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+              Sign out
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div style={{padding:isMobile?"12px":24,paddingBottom:40}}>
+        {/* Welcome */}
+        <div style={{marginBottom:20}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:4}}>
+            {previewClientId ? "Client view preview" : "Welcome back"}
+          </div>
+          <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:24,fontWeight:700,color:C.navy}}>{client.name}</div>
+          <div style={{fontSize:13,color:C.faint,marginTop:2}}>{client.code} · {client.jurisdiction}</div>
+        </div>
+
+        {/* Key stats */}
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(3,1fr)",gap:12,marginBottom:20}}>
+          <div style={{background:C.navy,borderRadius:12,padding:"18px 20px"}}>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:6}}>Portfolio value</div>
+            <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:26,fontWeight:700,color:C.white,letterSpacing:-0.5}}>{sym}{fmt(totals.totalValue,0)}</div>
+            <div style={{fontSize:12,color:totals.pl>=0?"#34D399":"#F87171",marginTop:4}}>{totals.pl>=0?"▲":"▼"} {pct(totals.pctReturn)} overall</div>
+          </div>
+          <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:"18px 20px"}}>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:C.faint,marginBottom:6}}>Inception value</div>
+            <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:26,fontWeight:700,color:C.navy,letterSpacing:-0.5}}>{sym}{fmt(totals.totalCost,0)}</div>
+            <div style={{fontSize:12,color:C.faint,marginTop:4}}>Cost basis</div>
+          </div>
+          <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:"18px 20px"}}>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:C.faint,marginBottom:6}}>Unrealised gain/loss</div>
+            <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:26,fontWeight:700,color:totals.pl>=0?C.green:C.red,letterSpacing:-0.5}}>{totals.pl>=0?"+":"-"}{sym}{fmt(Math.abs(totals.pl),0)}</div>
+            <div style={{fontSize:12,color:C.faint,marginTop:4}}>{pct(totals.pctReturn)} return</div>
+          </div>
+        </div>
+
+        {/* Chart */}
+        <div style={{background:C.navy,borderRadius:12,padding:"20px 22px",marginBottom:20}}>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:4}}>Portfolio value over time · {selectedCcy}</div>
+          <ResponsiveContainer width="100%" height={180}>
+            <AreaChart data={chartData}>
+              <defs><linearGradient id="cgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.teal} stopOpacity={0.3}/><stop offset="95%" stopColor={C.teal} stopOpacity={0}/></linearGradient></defs>
+              <XAxis dataKey="date" tick={{fontSize:10,fill:"rgba(255,255,255,0.35)"}}/>
+              <YAxis tick={{fontSize:9,fill:"rgba(255,255,255,0.35)"}} tickFormatter={v=>sym+Math.round(v/1000)+"k"}/>
+              <Tooltip formatter={v=>[sym+fmt(v,0),"Value"]} contentStyle={{background:C.navyMid,border:"none",borderRadius:6,fontSize:12}} labelStyle={{color:C.white}}/>
+              <Area type="monotone" dataKey="value" stroke={C.teal} strokeWidth={2} fill="url(#cgrad)" dot={{fill:C.teal,r:3}}/>
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Holdings */}
+        <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden",marginBottom:20}}>
+          <div style={{padding:"14px 18px",borderBottom:"0.5px solid "+C.silver,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:15,fontWeight:600,color:C.navy}}>Your holdings</div>
+            <div style={{display:"flex",gap:10}}>
+              <span style={{fontSize:12,color:C.faint}}>{equityH.length} positions</span>
+              <span style={{fontSize:12,color:C.faint}}>·</span>
+              <span style={{fontSize:12,color:C.faint}}>{cashH.length} cash</span>
+            </div>
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+              <thead><tr style={{background:C.silver}}>
+                {["Holding","Description","Value","P&L","Return"].map(h=>(
+                  <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                ))}
+              </tr></thead>
+              <tbody>
+                {holdings.map((h,i)=>{
+                  const cv=convertAmount(h.value,h.ccy,selectedCcy);
+                  const cc=convertAmount(h.cost,h.ccy,selectedCcy);
+                  const pl=cv-cc; const ret=calcPct(cc,cv);
+                  return(
+                    <tr key={i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2===0?C.white:"#FAFBFC"}}>
+                      <td style={{padding:"10px 14px",fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,color:C.navy}}>{h.ticker}</td>
+                      <td style={{padding:"10px 14px",color:C.text,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.name}</td>
+                      <td style={{padding:"10px 14px",fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,color:C.navy,textAlign:"right"}}>{sym}{fmt(cv,0)}</td>
+                      <td style={{padding:"10px 14px",textAlign:"right",fontWeight:600,color:h.isCash?"#999":pl>=0?C.green:C.red}}>{h.isCash?"—":(pl>=0?"+":"-")+sym+fmt(Math.abs(pl),0)}</td>
+                      <td style={{padding:"10px 14px",textAlign:"right",color:h.isCash?"#999":ret>=0?C.green:C.red}}>{h.isCash?"—":pct(ret)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot><tr style={{background:C.navy}}>
+                <td colSpan={2} style={{padding:"10px 14px",color:C.white,fontWeight:600}}>Total</td>
+                <td style={{padding:"10px 14px",textAlign:"right",color:C.white,fontFamily:"'Space Grotesk',sans-serif",fontWeight:700}}>{sym}{fmt(totals.totalValue,0)}</td>
+                <td style={{padding:"10px 14px",textAlign:"right",color:totals.pl>=0?"#34D399":"#F87171",fontWeight:600}}>{totals.pl>=0?"+":"-"}{sym}{fmt(Math.abs(totals.pl),0)}</td>
+                <td style={{padding:"10px 14px",textAlign:"right",color:totals.pctReturn>=0?"#34D399":"#F87171",fontWeight:600}}>{pct(totals.pctReturn)}</td>
+              </tr></tfoot>
+            </table>
+          </div>
+        </div>
+
+        {/* Footer note */}
+        <div style={{fontSize:11,color:C.faint,textAlign:"center",lineHeight:1.8}}>
+          Portfolio values are indicative and updated periodically. For queries contact your adviser.<br/>
+          i-Convergence Financial Platform · Data as of {new Date().toLocaleDateString("en-GB")}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ─── USER MANAGEMENT PAGE (adviser only) ─────────────────────────────────────
+const UserManagement = ({ user }) => {
+  const isMobile = useIsMobile();
+  const [users] = useState([
+    {id:"1",email:"james@iconvergence.co.uk",name:"James White",role:"adviser",lastLogin:"2024-06-01",status:"active"},
+    {id:"2",email:"sarah@iconvergence.co.uk",name:"Sarah Johnson",role:"adviser",lastLogin:"2024-05-30",status:"active"},
+    {id:"3",email:"Michael@i-FSC.com",name:"Michael Lightfoot",role:"client",clientId:"C00355633",lastLogin:"2024-05-28",status:"active"},
+    {id:"4",email:"Lyndsey@i-FSC.com",name:"Lyndsey Starkie",role:"client",clientId:"C00356735",lastLogin:"2024-05-15",status:"active"},
+    {id:"5",email:"Chris@i-FSC.com",name:"Chris Pauls",role:"client",clientId:"C00355634",lastLogin:"2024-04-20",status:"active"},
+    {id:"6",email:"Hash@i-FSC.com",name:"Hash Murji",role:"client",clientId:"C00347223",lastLogin:"2024-06-01",status:"active"},
+  ]);
+  const [showInvite,setShowInvite]=useState(false);
+  const [inviteEmail,setInviteEmail]=useState("");
+  const [inviteRole,setInviteRole]=useState("client");
+  const [inviteClientId,setInviteClientId]=useState("");
+  const [resetMsg,setResetMsg]=useState("");
+
+  const triggerReset = (email) => {
+    setResetMsg("Password reset email sent to "+email);
+    setTimeout(()=>setResetMsg(""),3000);
+  };
+
+  return(
+    <div style={{padding:isMobile?"12px 10px":24}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:12}}>
+        <div>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:3}}>Administration</div>
+          <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:22,fontWeight:600,color:C.navy}}>User management</div>
+        </div>
+        <Btn onClick={()=>setShowInvite(true)}>+ Invite user</Btn>
+      </div>
+
+      {resetMsg&&<div style={{background:C.tealLight,border:"1px solid "+C.teal,borderRadius:8,padding:"10px 16px",marginBottom:16,fontSize:13,color:C.tealMid}}>{resetMsg}</div>}
+
+      <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,overflow:"hidden"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead><tr style={{background:C.navy}}>
+            {["User","Email","Role","Client ID","Last login","Status","Actions"].map(h=>(
+              <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.6)",letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {users.map((u,i)=>(
+              <tr key={u.id} style={{borderBottom:"0.5px solid "+C.silver,background:i%2===0?C.white:"#FAFBFC"}}>
+                <td style={{padding:"11px 14px"}}>
+                  <div style={{display:"flex",gap:9,alignItems:"center"}}>
+                    <div style={{width:32,height:32,borderRadius:"50%",background:u.role==="adviser"?C.navy:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:12,fontWeight:700,flexShrink:0}}>
+                      {u.name.split(" ").map(n=>n[0]).join("")}
+                    </div>
+                    <span style={{fontWeight:600,color:C.navy}}>{u.name}</span>
+                  </div>
+                </td>
+                <td style={{padding:"11px 14px",color:C.text}}>{u.email}</td>
+                <td style={{padding:"11px 14px"}}><Badge color={u.role==="adviser"?"navy":"info"}>{u.role}</Badge></td>
+                <td style={{padding:"11px 14px",fontFamily:"monospace",fontSize:11,color:C.faint}}>{u.clientId||"—"}</td>
+                <td style={{padding:"11px 14px",color:C.faint}}>{u.lastLogin}</td>
+                <td style={{padding:"11px 14px"}}><Badge color="success">{u.status}</Badge></td>
+                <td style={{padding:"11px 14px"}}>
+                  <div style={{display:"flex",gap:6}}>
+                    <Btn small variant="ghost" onClick={()=>triggerReset(u.email)}>Reset pwd</Btn>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{marginTop:16,background:C.silver,borderRadius:10,padding:"14px 18px",fontSize:12,color:C.text,lineHeight:1.8}}>
+        <strong style={{color:C.navy}}>To manage users in Auth0:</strong> Visit{" "}
+        <a href="https://manage.auth0.com" target="_blank" rel="noreferrer" style={{color:C.teal}}>manage.auth0.com</a>
+        {" "}→ User Management → Users. Assign roles, reset passwords, enable/disable MFA, and view login history there.
+        Password resets above trigger an Auth0 email to the user.
+      </div>
+
+      {showInvite&&(
+        <Modal title="Invite user" onClose={()=>setShowInvite(false)}>
+          <FldInput label="Email address" value={inviteEmail} onChange={setInviteEmail} placeholder="user@example.com"/>
+          <FldSelect label="Role" value={inviteRole} onChange={setInviteRole} options={[{value:"adviser",label:"Adviser — full platform access"},{value:"client",label:"Client — portal access only"}]}/>
+          {inviteRole==="client"&&(
+            <FldSelect label="Link to client" value={inviteClientId} onChange={setInviteClientId} options={[{value:"",label:"Select client..."},...CLIENTS.map(c=>({value:c.id,label:c.name}))]}/>
+          )}
+          <div style={{background:C.silver,borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:12,color:C.text,lineHeight:1.7}}>
+            An invitation email will be sent. The user must set up MFA on first login. For client users, their portal will show only their linked portfolio.
+          </div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+            <Btn variant="secondary" onClick={()=>setShowInvite(false)}>Cancel</Btn>
+            <Btn onClick={()=>setShowInvite(false)}>Send invite</Btn>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+
 export default function App(){
+  const {user,loading,error,login,logout} = useAuth();
   const [section,setSection]=useState("dashboard");
   const [selectedClient,setSelectedClient]=useState(null);
   const [selectedCcy,setSelectedCcy]=useState("USD");
+  const [previewClientId,setPreviewClientId]=useState(null);
   const isMobile=useIsMobile();
-  const handleSection=(s)=>{setSection(s);if(s!=="clients")setSelectedClient(null);};
+
   useEffect(()=>{
     const style=document.createElement("style");
-    style.innerHTML=`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}*{box-sizing:border-box;}body{overflow-x:hidden;margin:0;padding:0;}`;
+    style.innerHTML=`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}@keyframes spin{to{transform:rotate(360deg)}}*{box-sizing:border-box;}body{overflow-x:hidden;margin:0;padding:0;}`;
     style.id="iconv-global";
     if(!document.getElementById("iconv-global")) document.head.appendChild(style);
     return ()=>{ const el=document.getElementById("iconv-global"); if(el) el.remove(); };
   },[]);
+
+  const handleSection=(s)=>{setSection(s);if(s!=="clients")setSelectedClient(null);};
+
+  // Loading state
+  if(loading){
+    return(
+      <div style={{minHeight:"100vh",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:32,fontWeight:700,color:C.white,marginBottom:20}}><span style={{color:C.teal}}>i-</span>Convergence</div>
+          <div style={{width:32,height:32,border:"3px solid rgba(0,184,176,0.3)",borderTop:"3px solid "+C.teal,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto"}}/>
+        </div>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      </div>
+    );
+  }
+
+  // Not logged in
+  if(!user){
+    return <LoginScreen onLogin={login} loading={loading} error={error}/>;
+  }
+
+  // Client portal preview (adviser previewing a client view)
+  if(previewClientId){
+    return <ClientPortal user={user} logout={()=>setPreviewClientId(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} previewClientId={previewClientId}/>;
+  }
+
+  // Client role - show client portal only
+  if(user.isClient && !user.isAdviser){
+    return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy}/>;
+  }
+
+  // Adviser role - full platform
   return(
     <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
-      <Nav section={section} setSection={handleSection} selectedCcy={selectedCcy} setCcy={setSelectedCcy}/>
+      <Nav section={section} setSection={handleSection} selectedCcy={selectedCcy} setCcy={setSelectedCcy} user={user} logout={logout}/>
       <div style={{flex:1,overflowY:"auto",paddingBottom:isMobile?68:0}}>
         {section==="dashboard"&&<Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy}/>}
-        {section==="clients"&&<ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy}/>}
+        {section==="clients"&&<ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClientId={setPreviewClientId}/>}
         {section==="alerts"&&<AlertsPage setSection={handleSection} setSelectedClient={setSelectedClient}/>}
         {section==="pricing"&&<Pricing selectedCcy={selectedCcy}/>}
         {section==="ai"&&<AIAssistant selectedCcy={selectedCcy} selectedClient={selectedClient}/>}
         {section==="news"&&<News/>}
         {section==="connect"&&<Connect/>}
+        {section==="users"&&<UserManagement user={user}/>}
       </div>
     </div>
   );
