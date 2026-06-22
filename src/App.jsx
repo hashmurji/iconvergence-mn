@@ -2502,7 +2502,7 @@ const LoginScreen = ({ onLogin, loading, error }) => (
 // ─── CLIENT PORTAL ───────────────────────────────────────────────────────────
 const ClientPortal = ({ user, logout, selectedCcy, setCcy, previewClientId }) => {
   const isMobile = useIsMobile();
-  const clientId = previewClientId || user.clientId;
+  const clientId = previewClientId || (user && user.clientId);
   const client = CLIENTS.find(c => c.id === clientId);
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
   const holdings = HOLDINGS[clientId] || [];
@@ -2510,6 +2510,10 @@ const ClientPortal = ({ user, logout, selectedCcy, setCcy, previewClientId }) =>
   const chartData = buildChart(clientId, selectedCcy);
   const equityH = holdings.filter(h => !h.isCash);
   const cashH = holdings.filter(h => h.isCash);
+  const [tab, setTab] = useState("portfolio");
+  const clientTxns = TXNS.filter(t => t.clientId === clientId);
+  const {result:txSorted,sort:txSort,toggleSort:txToggle,setFilter:txSetFilter,search:txSearch,setSearch:txSetSearch} = useSortFilter(clientTxns, {col:"tradedate",dir:"desc"});
+  const txTypes = [...new Set(clientTxns.map(t => t.txtype))].sort();
 
   if (!client) return (
     <div style={{minHeight:"100vh",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center"}}>
@@ -2523,31 +2527,25 @@ const ClientPortal = ({ user, logout, selectedCcy, setCcy, previewClientId }) =>
 
   return (
     <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh"}}>
-      {/* Client portal nav */}
+      {/* Nav */}
       <div style={{background:C.navy,padding:"0 20px",height:54,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100,borderBottom:"1px solid rgba(0,184,176,0.15)"}}>
         <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:18,fontWeight:700,color:C.white}}>
           <span style={{color:C.teal}}>i-</span>Convergence
-          {previewClientId && <span style={{fontSize:11,background:C.gold,color:C.navy,padding:"2px 8px",borderRadius:4,marginLeft:10,fontFamily:"'Inter',sans-serif",fontWeight:600}}>PREVIEW MODE</span>}
+          {previewClientId && <span style={{fontSize:11,background:C.gold,color:C.navy,padding:"2px 8px",borderRadius:4,marginLeft:10,fontFamily:"'Inter',sans-serif",fontWeight:600}}>ADVISER PREVIEW</span>}
         </div>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           <CCYSelector selectedCcy={selectedCcy} onChange={setCcy} compact={isMobile}/>
-          <div style={{fontSize:13,color:"rgba(255,255,255,0.5)"}}>
-            {previewClientId ? "Adviser preview" : (user && user.name)}
-          </div>
-          {!previewClientId && (
-            <button onClick={logout} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",color:"rgba(255,255,255,0.6)",borderRadius:6,padding:"5px 12px",fontSize:12,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-              Sign out
-            </button>
-          )}
+          <div style={{fontSize:13,color:"rgba(255,255,255,0.5)",display:isMobile?"none":"block"}}>{previewClientId ? "Adviser preview" : (user && user.name)}</div>
+          <button onClick={logout} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",color:"rgba(255,255,255,0.6)",borderRadius:6,padding:"5px 12px",fontSize:12,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
+            {previewClientId ? "← Exit preview" : "Sign out"}
+          </button>
         </div>
       </div>
 
       <div style={{padding:isMobile?"12px":24,paddingBottom:40}}>
         {/* Welcome */}
         <div style={{marginBottom:20}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:4}}>
-            {previewClientId ? "Client view preview" : "Welcome back"}
-          </div>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:4}}>{previewClientId ? "Client view preview" : "Welcome back"}</div>
           <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:24,fontWeight:700,color:C.navy}}>{client.name}</div>
           <div style={{fontSize:13,color:C.faint,marginTop:2}}>{client.code} · {client.jurisdiction}</div>
         </div>
@@ -2571,72 +2569,159 @@ const ClientPortal = ({ user, logout, selectedCcy, setCcy, previewClientId }) =>
           </div>
         </div>
 
-        {/* Chart */}
-        <div style={{background:C.navy,borderRadius:12,padding:"20px 22px",marginBottom:20}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:4}}>Portfolio value over time · {selectedCcy}</div>
-          <ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={chartData}>
-              <defs><linearGradient id="cgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.teal} stopOpacity={0.3}/><stop offset="95%" stopColor={C.teal} stopOpacity={0}/></linearGradient></defs>
-              <XAxis dataKey="date" tick={{fontSize:10,fill:"rgba(255,255,255,0.35)"}}/>
-              <YAxis tick={{fontSize:9,fill:"rgba(255,255,255,0.35)"}} tickFormatter={v=>sym+Math.round(v/1000)+"k"}/>
-              <Tooltip formatter={v=>[sym+fmt(v,0),"Value"]} contentStyle={{background:C.navyMid,border:"none",borderRadius:6,fontSize:12}} labelStyle={{color:C.white}}/>
-              <Area type="monotone" dataKey="value" stroke={C.teal} strokeWidth={2} fill="url(#cgrad)" dot={{fill:C.teal,r:3}}/>
-            </AreaChart>
-          </ResponsiveContainer>
+        {/* Tabs */}
+        <div style={{display:"flex",gap:0,borderBottom:"1px solid "+C.silver,marginBottom:18}}>
+          {[["portfolio","Portfolio"],["transactions","Transactions"]].map(([t,label])=>(
+            <button key={t} onClick={()=>setTab(t)} style={{background:"none",border:"none",borderBottom:tab===t?"2px solid "+C.teal:"2px solid transparent",color:tab===t?C.teal:C.faint,fontSize:13,fontWeight:tab===t?600:400,cursor:"pointer",padding:"9px 16px",marginBottom:-1,fontFamily:"'Inter',sans-serif"}}>
+              {label}
+            </button>
+          ))}
         </div>
 
-        {/* Holdings */}
-        <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden",marginBottom:20}}>
-          <div style={{padding:"14px 18px",borderBottom:"0.5px solid "+C.silver,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-            <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:15,fontWeight:600,color:C.navy}}>Your holdings</div>
-            <div style={{display:"flex",gap:10}}>
-              <span style={{fontSize:12,color:C.faint}}>{equityH.length} positions</span>
-              <span style={{fontSize:12,color:C.faint}}>·</span>
-              <span style={{fontSize:12,color:C.faint}}>{cashH.length} cash</span>
+        {/* PORTFOLIO TAB */}
+        {tab==="portfolio"&&(
+          <div>
+            {/* Chart */}
+            <div style={{background:C.navy,borderRadius:12,padding:"20px 22px",marginBottom:16}}>
+              <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:4}}>Portfolio value over time · {selectedCcy}</div>
+              <ResponsiveContainer width="100%" height={180}>
+                <AreaChart data={chartData}>
+                  <defs><linearGradient id="cgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.teal} stopOpacity={0.3}/><stop offset="95%" stopColor={C.teal} stopOpacity={0}/></linearGradient></defs>
+                  <XAxis dataKey="date" tick={{fontSize:10,fill:"rgba(255,255,255,0.35)"}}/>
+                  <YAxis tick={{fontSize:9,fill:"rgba(255,255,255,0.35)"}} tickFormatter={v=>sym+Math.round(v/1000)+"k"}/>
+                  <Tooltip formatter={v=>[sym+fmt(v,0),"Value"]} contentStyle={{background:C.navyMid,border:"none",borderRadius:6,fontSize:12}} labelStyle={{color:C.white}}/>
+                  <Area type="monotone" dataKey="value" stroke={C.teal} strokeWidth={2} fill="url(#cgrad)" dot={{fill:C.teal,r:3}}/>
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Holdings — full table matching adviser view */}
+            <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden",marginBottom:16}}>
+              <div style={{padding:"14px 18px",borderBottom:"0.5px solid "+C.silver,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:15,fontWeight:600,color:C.navy}}>Holdings</div>
+                <div style={{display:"flex",gap:10,alignItems:"center"}}>
+                  <Badge color="info">{equityH.length} positions</Badge>
+                  <Badge color="navy">{cashH.length} cash</Badge>
+                </div>
+              </div>
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <thead>
+                    <tr style={{background:C.silver}}>
+                      {["Ticker","Description","CCY","Qty","Cost Value","Market Value","P&L","Return"].map(h=>(
+                        <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {holdings.map((h,i)=>{
+                      const cv = convertAmount(h.value, h.ccy, selectedCcy);
+                      const cc = convertAmount(h.cost, h.ccy, selectedCcy);
+                      const pl = cv - cc;
+                      const ret = calcPct(cc, cv);
+                      return(
+                        <tr key={i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2===0?C.white:"#FAFBFC"}}>
+                          <td style={{padding:"10px 14px",fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,color:C.navy}}>{h.ticker}</td>
+                          <td style={{padding:"10px 14px",color:C.text,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.name}</td>
+                          <td style={{padding:"10px 14px"}}><Badge color={h.ccy==="GBP"?"navy":"info"}>{h.ccy}</Badge></td>
+                          <td style={{padding:"10px 14px",textAlign:"right",color:C.text}}>{h.isCash?"—":fmt(h.qty,0)}</td>
+                          <td style={{padding:"10px 14px",textAlign:"right",color:C.text}}>{sym}{fmt(cc)}</td>
+                          <td style={{padding:"10px 14px",textAlign:"right",fontWeight:600,color:C.navy}}>{sym}{fmt(cv)}</td>
+                          <td style={{padding:"10px 14px",textAlign:"right",fontWeight:600,color:h.isCash?"#999":pl>=0?C.green:C.red}}>
+                            {h.isCash?"—":(pl>=0?"+":"-")+sym+fmt(Math.abs(pl))}
+                          </td>
+                          <td style={{padding:"10px 14px",textAlign:"right",color:h.isCash?"#999":ret>=0?C.green:C.red}}>
+                            {h.isCash?"—":pct(ret)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{background:C.navy}}>
+                      <td colSpan={4} style={{padding:"10px 14px",color:C.white,fontWeight:600}}>Total</td>
+                      <td style={{padding:"10px 14px",textAlign:"right",color:"rgba(255,255,255,0.5)"}}>{sym}{fmt(totals.totalCost,0)}</td>
+                      <td style={{padding:"10px 14px",textAlign:"right",color:C.white,fontFamily:"'Space Grotesk',sans-serif",fontWeight:700}}>{sym}{fmt(totals.totalValue,0)}</td>
+                      <td style={{padding:"10px 14px",textAlign:"right",color:totals.pl>=0?"#34D399":"#F87171",fontWeight:600}}>
+                        {totals.pl>=0?"+":"-"}{sym}{fmt(Math.abs(totals.pl),0)}
+                      </td>
+                      <td style={{padding:"10px 14px",textAlign:"right",color:totals.pctReturn>=0?"#34D399":"#F87171",fontWeight:600}}>
+                        {pct(totals.pctReturn)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div style={{fontSize:11,color:C.faint,textAlign:"center",lineHeight:1.8}}>
+              Portfolio values are indicative and updated periodically. For queries contact your adviser.<br/>
+              i-Convergence Financial Platform · Data as of {new Date().toLocaleDateString("en-GB")}
             </div>
           </div>
-          <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-              <thead><tr style={{background:C.silver}}>
-                {["Holding","Description","Value","P&L","Return"].map(h=>(
-                  <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {holdings.map((h,i)=>{
-                  const cv=convertAmount(h.value,h.ccy,selectedCcy);
-                  const cc=convertAmount(h.cost,h.ccy,selectedCcy);
-                  const pl=cv-cc; const ret=calcPct(cc,cv);
-                  return(
-                    <tr key={i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2===0?C.white:"#FAFBFC"}}>
-                      <td style={{padding:"10px 14px",fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,color:C.navy}}>{h.ticker}</td>
-                      <td style={{padding:"10px 14px",color:C.text,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.name}</td>
-                      <td style={{padding:"10px 14px",fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,color:C.navy,textAlign:"right"}}>{sym}{fmt(cv,0)}</td>
-                      <td style={{padding:"10px 14px",textAlign:"right",fontWeight:600,color:h.isCash?"#999":pl>=0?C.green:C.red}}>{h.isCash?"—":(pl>=0?"+":"-")+sym+fmt(Math.abs(pl),0)}</td>
-                      <td style={{padding:"10px 14px",textAlign:"right",color:h.isCash?"#999":ret>=0?C.green:C.red}}>{h.isCash?"—":pct(ret)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot><tr style={{background:C.navy}}>
-                <td colSpan={2} style={{padding:"10px 14px",color:C.white,fontWeight:600}}>Total</td>
-                <td style={{padding:"10px 14px",textAlign:"right",color:C.white,fontFamily:"'Space Grotesk',sans-serif",fontWeight:700}}>{sym}{fmt(totals.totalValue,0)}</td>
-                <td style={{padding:"10px 14px",textAlign:"right",color:totals.pl>=0?"#34D399":"#F87171",fontWeight:600}}>{totals.pl>=0?"+":"-"}{sym}{fmt(Math.abs(totals.pl),0)}</td>
-                <td style={{padding:"10px 14px",textAlign:"right",color:totals.pctReturn>=0?"#34D399":"#F87171",fontWeight:600}}>{pct(totals.pctReturn)}</td>
-              </tr></tfoot>
-            </table>
-          </div>
-        </div>
+        )}
 
-        {/* Footer note */}
-        <div style={{fontSize:11,color:C.faint,textAlign:"center",lineHeight:1.8}}>
-          Portfolio values are indicative and updated periodically. For queries contact your adviser.<br/>
-          i-Convergence Financial Platform · Data as of {new Date().toLocaleDateString("en-GB")}
-        </div>
+        {/* TRANSACTIONS TAB */}
+        {tab==="transactions"&&(
+          <div>
+            <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+              <input value={txSearch} onChange={e=>txSetSearch(e.target.value)} placeholder="Search transactions..." style={{flex:1,minWidth:150,padding:"7px 11px",border:"1.5px solid "+C.silver,borderRadius:6,fontSize:12,fontFamily:"'Inter',sans-serif",outline:"none"}}/>
+              <select onChange={e=>txSetFilter("txtype",e.target.value)} style={{padding:"7px 10px",border:"1.5px solid "+C.silver,borderRadius:6,fontSize:12,fontFamily:"'Inter',sans-serif",color:C.navy,background:C.white}}>
+                <option value="all">All types</option>
+                {txTypes.map(t=><option key={t} value={t}>{t}</option>)}
+              </select>
+              <span style={{fontSize:12,color:C.faint,display:"flex",alignItems:"center"}}>{txSorted.length} records</span>
+            </div>
+            <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden"}}>
+              <div style={{overflowX:"auto",maxHeight:520,overflowY:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                  <thead style={{position:"sticky",top:0,zIndex:5}}>
+                    <tr style={{background:C.navy}}>
+                      {[["tradedate","Date"],["txtype","Type"],["ticker","Ticker"],["description","Description"],["ccy","CCY"],["qty","Qty"],["consideration","Amount"],["netamt","Net"]].map(([col,label])=>(
+                        <th key={col} onClick={()=>txToggle(col)} style={{padding:"9px 12px",textAlign:"left",fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.6)",letterSpacing:0.8,textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",userSelect:"none",background:C.navy}}>
+                          {label}<SortIcon dir={txSort.col===col?txSort.dir:null}/>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {txSorted.slice(0,300).map((t,i)=>{
+                      const tc = t.txtype==="BUY"?"success":t.txtype==="SELL"?"error":t.txtype==="Dividend"?"gold":t.txtype.includes("Fee")||t.txtype==="SR Fee"?"warning":"info";
+                      return(
+                        <tr key={i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2===0?C.white:"#FAFBFC"}}>
+                          <td style={{padding:"8px 12px",color:C.text,whiteSpace:"nowrap"}}>{t.tradedate}</td>
+                          <td style={{padding:"8px 12px"}}><Badge color={tc}>{t.txtype}</Badge></td>
+                          <td style={{padding:"8px 12px",fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,color:C.navy}}>{t.ticker}</td>
+                          <td style={{padding:"8px 12px",color:C.text,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
+                          <td style={{padding:"8px 12px"}}><Badge color={t.ccy==="GBP"?"navy":"info"}>{t.ccy}</Badge></td>
+                          <td style={{padding:"8px 12px",textAlign:"right",color:C.text}}>{t.qty!==0?fmt(Math.abs(t.qty),0):"—"}</td>
+                          <td style={{padding:"8px 12px",textAlign:"right",fontWeight:600,color:C.navy}}>{fmt(t.consideration)}</td>
+                          <td style={{padding:"8px 12px",textAlign:"right",color:t.netamt>=0?C.green:C.red,fontWeight:500}}>{fmt(t.netamt)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {txSorted.length>300&&(
+                <div style={{padding:"9px 14px",fontSize:11,color:C.faint,borderTop:"0.5px solid "+C.silver}}>
+                  Showing 300 of {txSorted.length} transactions — use search or filters to narrow results
+                </div>
+              )}
+            </div>
+
+            <div style={{marginTop:16,fontSize:11,color:C.faint,textAlign:"center",lineHeight:1.8}}>
+              Transaction history is for reference only. For queries contact your adviser.<br/>
+              i-Convergence Financial Platform · Data as of {new Date().toLocaleDateString("en-GB")}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 };
+
 
 // ─── USER MANAGEMENT PAGE (adviser only) ─────────────────────────────────────
 const UserManagement = ({ user }) => {
