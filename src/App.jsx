@@ -606,7 +606,7 @@ const Dashboard=({setSection,setSelectedClient,selectedCcy})=>{
         <div style={{fontSize:10,fontWeight:600,letterSpacing:3,textTransform:"uppercase",color:C.teal,marginBottom:3}}>Platform overview</div>
         <div style={{display:"flex",alignItems:"baseline",gap:12}}>
           <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:24,fontWeight:700,color:C.navy,letterSpacing:-0.5}}>Aggregate dashboard</div>
-          <div style={{fontSize:12,color:C.faint}}>Reporting in <strong style={{color:C.navy}}>{selectedCcy}</strong> · {sym}{fmt(FX[`GBPUSD`]??"1.26")} = £1.00</div>
+          <div style={{fontSize:12,color:C.faint}}>Reporting in <strong style={{color:C.navy}}>{selectedCcy}</strong> · {sym}{fmt(FX["GBPUSD"]||1.2618,4)} = £1.00</div>
         </div>
       </div>
 
@@ -714,6 +714,7 @@ const Dashboard=({setSection,setSelectedClient,selectedCcy})=>{
         </div>
       </div>
     </div>
+  </div>
   );
 };
 
