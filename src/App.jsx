@@ -626,29 +626,67 @@ const Dashboard=({setSection,setSelectedClient,selectedCcy})=>{
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
-        {CLIENTS.map(c=>{
-          const t=clientTotals(c.id,selectedCcy);
-          return(
-            <div key={c.id} onClick={()=>{setSelectedClient(c.id);setSection("clients");}} style={{background:C.white,border:`0.5px solid ${C.silver}`,borderRadius:10,padding:16,cursor:"pointer"}}
-              onMouseEnter={e=>e.currentTarget.style.borderColor=C.teal}
-              onMouseLeave={e=>e.currentTarget.style.borderColor=C.silver}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
-                <div>
-                  <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:14,fontWeight:600,color:C.navy}}>{c.name}</div>
-                  <div style={{fontSize:10,color:C.faint}}>{c.code}</div>
-                </div>
-                <Badge color={c.verified?"success":"warning"}>{c.verified?"✓":"Pending"}</Badge>
-              </div>
-              <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:20,fontWeight:700,color:C.navy}}>{sym}{fmt(t.totalValue,0)}</div>
-              <div style={{display:"flex",gap:10,marginTop:6}}>
-                <span style={{fontSize:12,color:t.pl>=0?C.green:C.red,fontWeight:600}}>{t.pl>=0?"+":""}{sym}{fmt(Math.abs(t.pl),0)}</span>
-                <span style={{fontSize:12,color:t.pctReturn>=0?C.green:C.red}}>{pct(t.pctReturn)}</span>
-              </div>
+            {/* Mobile: horizontal scrolling client banner */}
+      {isMobile ? (
+        <div style={{marginBottom:14,marginLeft:-12,marginRight:-12}}>
+          <div style={{overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingLeft:12,paddingRight:12,paddingBottom:6}}>
+            <style>{".client-scroll::-webkit-scrollbar{display:none}"}</style>
+            <div className="client-scroll" style={{display:"flex",gap:10,width:"max-content"}}>
+              {CLIENTS.map(c=>{
+                const t=clientTotals(c.id,selectedCcy);
+                return(
+                  <div key={c.id} onClick={()=>{setSelectedClient(c.id);setSection("clients");}}
+                    style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:"14px 16px",cursor:"pointer",width:190,flexShrink:0,boxShadow:"0 2px 8px rgba(0,0,0,0.06)"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                      <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:12,fontWeight:700}}>
+                        {c.name.split(" ").map(n=>n[0]).join("")}
+                      </div>
+                      <Badge color={c.verified?"success":"warning"}>{c.verified?"✓":"?"}</Badge>
+                    </div>
+                    <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:13,fontWeight:600,color:C.navy,marginBottom:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</div>
+                    <div style={{fontSize:9,color:C.faint,marginBottom:8,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.code}</div>
+                    <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:18,fontWeight:700,color:C.navy,letterSpacing:-0.3,marginBottom:5}}>{sym}{fmt(t.totalValue,0)}</div>
+                    <div style={{display:"flex",gap:5,alignItems:"center",flexWrap:"wrap"}}>
+                      <span style={{fontSize:11,fontWeight:600,color:t.pl>=0?C.green:C.red}}>{t.pl>=0?"+":"-"}{sym}{fmt(Math.abs(t.pl),0)}</span>
+                      <span style={{fontSize:10,color:t.pctReturn>=0?C.green:C.red,background:t.pctReturn>=0?C.greenBg:C.redBg,padding:"1px 5px",borderRadius:3,fontWeight:600}}>{pct(t.pctReturn)}</span>
+                    </div>
+                    <div style={{marginTop:8,fontSize:10,color:C.teal,fontWeight:600}}>View →</div>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
+          </div>
+          <div style={{display:"flex",justifyContent:"center",gap:5,marginTop:6}}>
+            {CLIENTS.map((_,i)=>(
+              <div key={i} style={{width:i===0?18:5,height:3,borderRadius:2,background:i===0?C.teal:C.silverMid}}/>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
+          {CLIENTS.map(c=>{
+            const t=clientTotals(c.id,selectedCcy);
+            return(
+              <div key={c.id} onClick={()=>{setSelectedClient(c.id);setSection("clients");}} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:16,cursor:"pointer"}}
+                onMouseEnter={e=>e.currentTarget.style.borderColor=C.teal}
+                onMouseLeave={e=>e.currentTarget.style.borderColor=C.silver}>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+                  <div>
+                    <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:14,fontWeight:600,color:C.navy}}>{c.name}</div>
+                    <div style={{fontSize:10,color:C.faint}}>{c.code}</div>
+                  </div>
+                  <Badge color={c.verified?"success":"warning"}>{c.verified?"✓":"Pending"}</Badge>
+                </div>
+                <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:20,fontWeight:700,color:C.navy}}>{sym}{fmt(t.totalValue,0)}</div>
+                <div style={{display:"flex",gap:10,marginTop:6}}>
+                  <span style={{fontSize:12,color:t.pl>=0?C.green:C.red,fontWeight:600}}>{t.pl>=0?"+":""}{sym}{fmt(Math.abs(t.pl),0)}</span>
+                  <span style={{fontSize:12,color:t.pctReturn>=0?C.green:C.red}}>{pct(t.pctReturn)}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
         <div style={{background:C.white,border:`0.5px solid ${C.silver}`,borderRadius:10,padding:18}}>
