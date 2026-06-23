@@ -637,9 +637,12 @@ const Dashboard=({setSection,setSelectedClient,selectedCcy})=>{
             id="client-scroll"
             onScroll={e=>{
               const el=e.target;
-              const idx=Math.round(el.scrollLeft/(el.scrollWidth/CLIENTS.length));
-              const dots=document.querySelectorAll(".client-dot");
-              dots.forEach((d,i)=>{d.style.width=i===idx?"18px":"5px";d.style.background=i===idx?C.teal:C.silverMid;});
+              const cardW=el.scrollWidth/CLIENTS.length;
+              const active=Math.round(el.scrollLeft/cardW);
+              document.querySelectorAll(".client-dot").forEach((d,i)=>{
+                d.style.width=i===active?"18px":"5px";
+                d.style.background=i===active?"#00B8B0":"#C4CDD8";
+              });
             }}
             style={{overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingLeft:16,paddingRight:16,paddingBottom:8,scrollSnapType:"x mandatory",display:"flex",gap:12}}>
             {CLIENTS.map(c=>{
