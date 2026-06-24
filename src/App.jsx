@@ -1,15 +1,10 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid, AreaChart, Area } from "recharts";
-import { RAW_TXNS } from "./data.js";
 
 // --- AUTH0 CONFIG ------------------------------------------------------------
 const AUTH0_DOMAIN = "iconvergence.uk.auth0.com";
 const AUTH0_CLIENT_ID = "jWc8OqcK0Vw77Z1sIYQOr7BNviukmrbp";
 const AUTH0_REDIRECT_URI = typeof window !== "undefined" ? window.location.origin : "";
-const AUTH0_AUDIENCE = "https://"+AUTH0_DOMAIN+"/api/v2/";
 
-// --- SIMPLE AUTH0 HOOK (no SDK dependency) -----------------------------------
-// Uses Auth0 Universal Login + PKCE flow - no SDK needed
 const generateCodeVerifier = () => {
   const array = new Uint8Array(32);
   crypto.getRandomValues(array);
@@ -27,82 +22,37 @@ const useAuth = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Get stored tokens
   const getStoredAuth = () => {
-    try {
-      const stored = sessionStorage.getItem("iconv_auth");
-      return stored ? JSON.parse(stored) : null;
-    } catch(e) { return null; }
+    try { const s = sessionStorage.getItem("mn_auth"); return s ? JSON.parse(s) : null; } catch(e) { return null; }
   };
-
   const decodeJWT = (token) => {
-    try {
-      const base64 = token.split(".")[1].split("-").join("+").split("_").join("/");
-      const decoded = JSON.parse(atob(base64));
-      return decoded;
-    } catch(e) { return null; }
+    try { const b = token.split(".")[1].split("-").join("+").split("_").join("/"); return JSON.parse(atob(b)); } catch(e) { return null; }
   };
-
   const getUserFromToken = (idToken, accessToken) => {
-    const decoded = decodeJWT(idToken);
-    if (!decoded) return null;
-    // Extract roles from Auth0 namespace claim
-    const roles = decoded["https://iconvergence.co.uk/roles"] || 
-                  decoded["https://iconvergence.uk.auth0.com/roles"] || [];
-    // Extract client_id from app_metadata
-    const clientId = decoded["https://iconvergence.co.uk/client_id"] ||
-                     decoded["https://iconvergence.uk.auth0.com/client_id"] || null;
-    return {
-      sub: decoded.sub,
-      email: decoded.email,
-      name: decoded.name || decoded.email,
-      picture: decoded.picture,
-      roles,
-      clientId,
-      isAdviser: roles.includes("adviser") || roles.length === 0, // default to adviser if no role set
-      isClient: roles.includes("client"),
-      idToken,
-      accessToken,
-    };
+    const d = decodeJWT(idToken);
+    if (!d) return null;
+    const roles = d["https://iconvergence.co.uk/roles"] || d["https://iconvergence.uk.auth0.com/roles"] || [];
+    const clientId = d["https://iconvergence.co.uk/client_id"] || d["https://iconvergence.uk.auth0.com/client_id"] || null;
+    return { sub: d.sub, email: d.email, name: d.name || d.email, roles, clientId, isAdviser: roles.includes("adviser") || roles.length === 0, isClient: roles.includes("client"), idToken, accessToken };
   };
-
-  // Handle Auth0 callback (code exchange)
   const handleCallback = async () => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
     const state = params.get("state");
     const storedState = sessionStorage.getItem("auth0_state");
     const verifier = sessionStorage.getItem("auth0_verifier");
-
     if (!code || !verifier) return false;
     if (state !== storedState) { setError("Invalid state"); return false; }
-
     try {
       const response = await fetch("https://"+AUTH0_DOMAIN+"/oauth/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          grant_type: "authorization_code",
-          client_id: AUTH0_CLIENT_ID,
-          code_verifier: verifier,
-          code,
-          redirect_uri: AUTH0_REDIRECT_URI,
-        }),
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grant_type: "authorization_code", client_id: AUTH0_CLIENT_ID, code_verifier: verifier, code, redirect_uri: AUTH0_REDIRECT_URI }),
       });
-
       const tokens = await response.json();
       if (tokens.error) { setError(tokens.error_description); return false; }
-
-      const authData = {
-        idToken: tokens.id_token,
-        accessToken: tokens.access_token,
-        expiresAt: Date.now() + (tokens.expires_in * 1000),
-      };
-      sessionStorage.setItem("iconv_auth", JSON.stringify(authData));
-      sessionStorage.removeItem("auth0_state");
-      sessionStorage.removeItem("auth0_verifier");
-
-      // Clean URL
+      const authData = { idToken: tokens.id_token, accessToken: tokens.access_token, expiresAt: Date.now() + (tokens.expires_in * 1000) };
+      sessionStorage.setItem("mn_auth", JSON.stringify(authData));
+      sessionStorage.removeItem("auth0_state"); sessionStorage.removeItem("auth0_verifier");
       window.history.replaceState({}, document.title, window.location.pathname);
       return authData;
     } catch(e) { setError("Login failed: "+e.message); return false; }
@@ -111,20 +61,12 @@ const useAuth = () => {
   useEffect(() => {
     const init = async () => {
       setLoading(true);
-      // Check if returning from Auth0
       if (window.location.search.includes("code=")) {
         const authData = await handleCallback();
-        if (authData) {
-          const u = getUserFromToken(authData.idToken, authData.accessToken);
-          setUser(u);
-        }
+        if (authData) setUser(getUserFromToken(authData.idToken, authData.accessToken));
       } else {
-        // Check stored session
         const stored = getStoredAuth();
-        if (stored && stored.expiresAt > Date.now()) {
-          const u = getUserFromToken(stored.idToken, stored.accessToken);
-          setUser(u);
-        }
+        if (stored && stored.expiresAt > Date.now()) setUser(getUserFromToken(stored.idToken, stored.accessToken));
       }
       setLoading(false);
     };
@@ -137,289 +79,273 @@ const useAuth = () => {
     const state = generateCodeVerifier();
     sessionStorage.setItem("auth0_verifier", verifier);
     sessionStorage.setItem("auth0_state", state);
-
-    const params = new URLSearchParams({
-      response_type: "code",
-      client_id: AUTH0_CLIENT_ID,
-      redirect_uri: AUTH0_REDIRECT_URI,
-      scope: "openid profile email",
-      state,
-      code_challenge: challenge,
-      code_challenge_method: "S256",
-      // Force MFA
-      acr_values: "http://schemas.openid.net/pape/policies/2007/06/multi-factor",
-    });
-
+    const params = new URLSearchParams({ response_type: "code", client_id: AUTH0_CLIENT_ID, redirect_uri: AUTH0_REDIRECT_URI, scope: "openid profile email", state, code_challenge: challenge, code_challenge_method: "S256" });
     window.location.href = "https://"+AUTH0_DOMAIN+"/authorize?"+params.toString();
   };
-
   const logout = () => {
-    sessionStorage.removeItem("iconv_auth");
+    sessionStorage.removeItem("mn_auth");
     setUser(null);
     window.location.href = "https://"+AUTH0_DOMAIN+"/v2/logout?client_id="+AUTH0_CLIENT_ID+"&returnTo="+encodeURIComponent(AUTH0_REDIRECT_URI);
   };
-
   return { user, loading, error, login, logout };
 };
 
-
-// --- MOBILE HOOK -------------------------------------------------
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = useState(typeof window !== "undefined" ? window.innerWidth < 768 : false);
   useEffect(() => {
-    const handler = () => setIsMobile(window.innerWidth < 768);
-    window.addEventListener("resize", handler);
-    return () => window.removeEventListener("resize", handler);
+    const h = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
   }, []);
   return isMobile;
 };
 
-
-
-// --- i-CONVERGENCE BRAND -------------------------------------------
+// --- BRAND -------------------------------------------------------------------
 const C = {
   navy: "#0D1B2E", navyMid: "#162840", navyLight: "#1E3A5F",
-  teal: "#00B8B0", tealLight: "#E6F9F8", tealMid: "#009990",
-  gold: "#F5A623", goldLight: "#FEF5E7",
+  teal: "#00B8B0", tealLight: "#E6F9F8",
   silver: "#EFF2F6", silverMid: "#C4CDD8",
   white: "#FFFFFF", text: "#2D3748", faint: "#8A9AB0",
   green: "#10B981", greenBg: "#D1FAE5",
   red: "#EF4444", redBg: "#FEE2E2",
   amber: "#F59E0B", amberBg: "#FEF3C7",
+  gold: "#F5A623", goldLight: "#FEF5E7",
 };
 
-// --- FX RATES (from Price File + CNY) -------------------------------
-const FX = {
-  GBPUSD: 1.2618, GBPEUR: 1.16027586, GBPCNY: 11.47,
-  USDGBP: 0.79251862, USDEUR: 0.91954023, USDCNY: 7.24,
-  EURGBP: 0.861864, EURUSD: 1.0875, EURCNY: 7.91,
-  CNYGBP: 0.08726, CNYUSD: 0.1381, CNYEUR: 0.1264,
-};
-
+// --- FX (static for now - will be updated manually) -------------------------
+const FX = { GBPUSD: 1.2618, GBPEUR: 1.16, USDGBP: 0.7925, USDEUR: 0.9195, EURGBP: 0.8619, EURUSD: 1.0875 };
+const CCY_SYMBOLS = { USD: "$", GBP: "£", EUR: "€" };
 const convertAmount = (amount, fromCcy, toCcy) => {
   if (!amount || fromCcy === toCcy) return amount || 0;
   const key = fromCcy.toUpperCase()+toCcy.toUpperCase();
   if (FX[key]) return amount * FX[key];
   const key2 = toCcy.toUpperCase()+fromCcy.toUpperCase();
   if (FX[key2]) return amount / FX[key2];
-  // Via USD
-  const toUSD = FX[fromCcy.toUpperCase()+"USD"] || 1;
-  const fromUSD = FX["USD"+toCcy.toUpperCase()] || 1;
-  return amount * toUSD * fromUSD;
+  return amount;
 };
 
-const CCY_SYMBOLS = { USD: "$", GBP: "£", EUR: "€", CNY: "¥" };
-
-// --- ALL TRANSACTIONS (1283 rows from Excel) -------------------------
-// Fields: [sel, tradedate, settdate, clientId, txtype, ticker, desc, ccy, qty, consideration, netamt, costprice, costvalue]
-
-
-const TXNS = RAW_TXNS.map((r, i) => ({
-  id: i,
-  selector: r[0] === 'T' ? 'Trade' : r[0] === 'C' ? 'Cashflow' : r[0] === 'D' ? 'Dividend' : 'CorpAct',
-  tradedate: r[1], settdate: r[2], clientId: r[3],
-  txtype: r[4], ticker: r[5], description: r[6],
-  ccy: r[7], qty: r[8], consideration: r[9],
-  netamt: r[10], costprice: r[11], costvalue: r[12],
-}));
-
-// --- CLIENT DATA -----------------------------------------------------
+// --- CLIENT DATA (from MN_Client_Data_for_PAS_test.xlsx) ---------------------
 const CLIENTS = [
-  { id:"C00355633",code:"355633-Lightfoot",name:"Michael Lightfoot",email:"Michael@i-FSC.com",address:"1 New Lane",jurisdiction:"US",verified:true,phone:"+1 212 555 0147",joined:"2020-10-01" },
-  { id:"C00356735",code:"356735-Starkie",name:"Lyndsey Starkie",email:"Lyndsey@i-FSC.com",address:"25 Gary Close",jurisdiction:"US",verified:true,phone:"+1 646 555 0293",joined:"2021-02-15" },
-  { id:"C00355634",code:"355634-Pauls",name:"Chris Pauls",email:"Chris@i-FSC.com",address:"23 High Street",jurisdiction:"US",verified:true,phone:"+1 212 555 0381",joined:"2020-10-01" },
-  { id:"C00347223",code:"347223-Murji",name:"Hash Murji",email:"Hash@i-FSC.com",address:"8 Elm Gardens",jurisdiction:"US",verified:true,phone:"+1 917 555 0562",joined:"2020-09-01" },
+  {
+    id: "C00007630",
+    clientId: "STM-346521/03-Dn",
+    accountNumber: "F00048105",
+    primaryCode: "346521-Dn",
+    name: "Don Nuttal",
+    reportingCcy: "USD",
+    bankAccount: "12345678",
+    bankSort: "01-00-01",
+    bankName: "Don Nuttal",
+    email: "dn@hotmail.com",
+    address: "1 New Lane",
+    jurisdiction: "US",
+    verified: true,
+  },
 ];
+
+const VALUATIONS = {
+  "C00007630": {
+    totalValuationNotice: 2363895.11,
+    totalBriteAssets: 2416957.19,
+    totalAssetValuation: 2379365.71,
+    totalCashBalance: 37591.48,
+    pensionValuation: 2379365.71,
+    pensionCash: 37591.48,
+    directInvestmentCash: 0,
+    directInvestmentAssets: 0,
+    totalLiabilities: 53062.08,
+    surrenderRebatePayable: 53062.08,
+  },
+};
 
 const HOLDINGS = {
-  C00355634:[
-    {ticker:"CASH-USD",name:"US Dollar Cash",ccy:"USD",qty:0,cost:0,value:259941.71,isCash:true},
-    {ticker:"VTI",name:"Vanguard Total Stock Market",ccy:"USD",qty:296,cost:62573.45,value:56488.05},
-    {ticker:"BNDX",name:"Vanguard Total Intl Bond",ccy:"USD",qty:412,cost:22009.04,value:22397.90},
-    {ticker:"VPL",name:"Vanguard FTSE Pacific",ccy:"USD",qty:302,cost:22712.64,value:21881.02},
-    {ticker:"DBEU",name:"Xtrackers MSCI Europe Hedged",ccy:"USD",qty:605,cost:19503.65,value:16528.03},
-    {ticker:"ARKK",name:"ARK Innovation ETF",ccy:"USD",qty:139,cost:16402.47,value:16819.46},
-    {ticker:"IAU",name:"iShares Gold Trust",ccy:"USD",qty:325,cost:10981.46,value:11449.10},
-    {ticker:"VYM",name:"Vanguard High Dividend Yield",ccy:"USD",qty:106,cost:10022.71,value:10182.16},
-    {ticker:"SGOV",name:"iShares 0-3M Treasury Bond",ccy:"USD",qty:100,cost:9512.22,value:9434.20},
-    {ticker:"VCSH",name:"Vanguard S-T Corp Bond",ccy:"USD",qty:220,cost:17197.99,value:17156.99},
-    {ticker:"SCHP",name:"Schwab US TIPS ETF",ccy:"USD",qty:315,cost:17050.95,value:16866.51},
-    {ticker:"SCHO",name:"Schwab S-T US Treasury",ccy:"USD",qty:344,cost:16859.26,value:16915.94},
-    {ticker:"LGLV",name:"SPDR US Large Cap Low Vol",ccy:"USD",qty:125,cost:15610.98,value:13857.91},
-    {ticker:"VWO",name:"Vanguard FTSE Emerging Markets",ccy:"USD",qty:423,cost:20329.55,value:19260.91},
-  ],
-  C00355633:[
-    {ticker:"Cash-USD",name:"US Dollar Cash",ccy:"USD",qty:0,cost:0,value:360802.77,isCash:true},
-    {ticker:"VTI",name:"Vanguard Total Stock Market",ccy:"USD",qty:676,cost:138422.35,value:138548.47},
-    {ticker:"VPL",name:"Vanguard FTSE Pacific",ccy:"USD",qty:690,cost:53297.83,value:53298.61},
-    {ticker:"VWO",name:"Vanguard FTSE Emerging Markets",ccy:"USD",qty:966,cost:46128.70,value:46128.55},
-    {ticker:"DBEU",name:"Xtrackers MSCI Europe Hedged",ccy:"USD",qty:1384,cost:41766.26,value:39360.01},
-    {ticker:"BNDX",name:"Vanguard Total Intl Bond",ccy:"USD",qty:354,cost:18312.78,value:18260.96},
-    {ticker:"VCSH",name:"Vanguard S-T Corp Bond",ccy:"USD",qty:226,cost:17568.81,value:17484.06},
-    {ticker:"SCHP",name:"Schwab US TIPS ETF",ccy:"USD",qty:324,cost:17553.52,value:17460.87},
-    {ticker:"SCHO",name:"Schwab S-T US Treasury",ccy:"USD",qty:354,cost:17339.56,value:17234.64},
-    {ticker:"CASH-GBP",name:"Sterling Cash",ccy:"GBP",qty:0,cost:0,value:6582.16,isCash:true},
-  ],
-  C00347223:[
-    {ticker:"Cash-GBP",name:"Sterling Cash",ccy:"GBP",qty:0,cost:0,value:823723.83,isCash:true},
-    {ticker:"GSPX",name:"iShares Core S&P 500 GBP-H",ccy:"GBP",qty:36113,cost:272743.37,value:222739.76},
-    {ticker:"IS15",name:"iShares GBP Corp Bond 0-5Yr",ccy:"GBP",qty:726,cost:72741.75,value:71679.59},
-    {ticker:"GILS",name:"Lyxor Core UK Govt Bond",ccy:"GBP",qty:681,cost:70777.59,value:70777.59},
-    {ticker:"EMIM",name:"iShares Core EM IMI",ccy:"GBP",qty:3012,cost:80423.01,value:72737.56},
-    {ticker:"EUXS",name:"iShares MSCI Europe Ex-UK",ccy:"GBP",qty:11958,cost:74838.31,value:59742.93},
-    {ticker:"ERNS",name:"iShares GBP Ultrashort Bond",ccy:"GBP",qty:695,cost:67797.60,value:67208.56},
-    {ticker:"XGIG",name:"Invesco Global HY Corp Bond",ccy:"GBP",qty:1757,cost:49703.32,value:47130.84},
-    {ticker:"AGBP",name:"iShares Core Glb Agg GBP-H",ccy:"GBP",qty:9389,cost:47056.35,value:47193.89},
-    {ticker:"IJPH",name:"iShares MSCI Japan GBP-H",ccy:"GBP",qty:533,cost:40163.70,value:31910.85},
-    {ticker:"VAPX",name:"Vanguard FTSE Asia Pacific",ccy:"USD",qty:2237,cost:44262.79,value:38968.78},
-    {ticker:"VGOV",name:"Vanguard UK Gilt",ccy:"GBP",qty:0,cost:174.75,value:27261.04},
-    {ticker:"CSH2",name:"Lyxor Smart Cash",ccy:"GBP",qty:40,cost:41364.90,value:41241.16},
-    {ticker:"CUKX",name:"iShares Core FTSE 100",ccy:"GBP",qty:122,cost:14998.89,value:12361.07},
-  ],
-  C00356735:[
-    {ticker:"CASH-GBP",name:"Sterling Cash",ccy:"GBP",qty:0,cost:0,value:646744.47,isCash:true},
-    {ticker:"GSPX",name:"iShares Core S&P 500 GBP-H",ccy:"GBP",qty:37468,cost:245565.28,value:243819.56},
-    {ticker:"EMIM",name:"iShares Core EM IMI",ccy:"GBP",qty:3125,cost:84549.12,value:84659.55},
-    {ticker:"GILS",name:"Lyxor Core UK Govt Bond",ccy:"GBP",qty:318,cost:33050.33,value:33050.33},
-    {ticker:"EUXS",name:"iShares MSCI Europe Ex-UK",ccy:"GBP",qty:12407,cost:66498.40,value:63725.10},
-    {ticker:"ERNS",name:"iShares GBP Ultrashort Bond",ccy:"GBP",qty:324,cost:31551.91,value:31575.39},
-    {ticker:"VAPX",name:"Vanguard FTSE Asia Pacific",ccy:"USD",qty:2321,cost:45430.21,value:45356.01},
-    {ticker:"IS15",name:"iShares GBP Corp Bond 0-5Yr",ccy:"GBP",qty:339,cost:34075.88,value:34079.36},
-    {ticker:"IJPH",name:"iShares MSCI Japan GBP-H",ccy:"GBP",qty:553,cost:38533.04,value:38123.90},
-    {ticker:"XGIG",name:"Invesco Global HY Corp Bond",ccy:"GBP",qty:684,cost:18026.89,value:17964.64},
-    {ticker:"AGBP",name:"iShares Core Glb Agg GBP-H",ccy:"GBP",qty:3653,cost:17988.94,value:17995.92},
-    {ticker:"CUKX",name:"iShares Core FTSE 100",ccy:"GBP",qty:126,cost:13996.08,value:13128.49},
-    {ticker:"Cash-USD",name:"US Dollar Cash",ccy:"USD",qty:0,cost:0,value:3575.23,isCash:true},
-    {ticker:"VGOV",name:"Vanguard UK Gilt",ccy:"GBP",qty:0,cost:65.20,value:9158.18},
+  "C00007630": [
+    { name: "VANECK BIOTECH ETF", purchasePrice: "USD 195.41", marketValue: "USD 29,966.24", gainLoss: "USD -5,988.65", pctChange: -16.66, account: "STM Malta / RL360", shares: 184, ccy: "USD" },
+    { name: "VANGUARD HEALTH CARE ETF", purchasePrice: "USD 245.57", marketValue: "USD 49,962.57", gainLoss: "USD 602.26", pctChange: 1.22, account: "STM Malta / RL360", shares: 201, ccy: "USD" },
+    { name: "VANECK SEMICONDUCTOR", purchasePrice: "USD 63.39", marketValue: "USD 40,488.56", gainLoss: "USD 25,401.35", pctChange: 168.36, account: "STM Malta / RL360", shares: 238, ccy: "USD" },
+    { name: "VANGUARD TOTAL STOCK MKT ETF", purchasePrice: "USD 197.90", marketValue: "USD 106,344.96", gainLoss: "USD 16,497.91", pctChange: 18.36, account: "STM Malta / RL360", shares: 454, ccy: "USD" },
+    { name: "CONSUMER STAPLES SPDR", purchasePrice: "USD 75.85", marketValue: "USD 47,934.90", gainLoss: "USD -2,352.19", pctChange: -4.68, account: "STM Malta / RL360", shares: 663, ccy: "USD" },
+    { name: "VANGUARD FTSE EMERGING MARKETS", purchasePrice: "USD 52.60", marketValue: "USD 29,680.56", gainLoss: "USD -8,612.24", pctChange: -22.49, account: "STM Malta / RL360", shares: 728, ccy: "USD" },
+    { name: "VANGUARD INTERMEDIATE-TERM TREASURY", purchasePrice: "USD 59.85", marketValue: "USD 49,180.98", gainLoss: "USD -730.75", pctChange: -1.46, account: "STM Malta / RL360", shares: 834, ccy: "USD" },
+    { name: "MICROSTRATEGY INC-CL A", purchasePrice: "USD 320.18", marketValue: "USD 492,240.00", gainLoss: "USD 223,287.99", pctChange: 83.02, account: "STM Malta / RL360", shares: 840, ccy: "USD" },
+    { name: "TESLA INC", purchasePrice: "USD 202.09", marketValue: "USD 257,476.04", gainLoss: "USD 40,028.62", pctChange: 18.41, account: "STM Malta / RL360", shares: 1076, ccy: "USD" },
+    { name: "PURPOSE BITCOIN ETF", purchasePrice: "USD 8.06", marketValue: "USD 8,624.00", gainLoss: "USD -241.56", pctChange: -2.72, account: "STM Malta / RL360", shares: 1100, ccy: "USD" },
+    { name: "ENERGY SELECT SECTOR SPDR", purchasePrice: "USD 84.86", marketValue: "USD 95,008.82", gainLoss: "USD -2,917.77", pctChange: -2.98, account: "STM Malta / RL360", shares: 1154, ccy: "USD" },
+    { name: "BITWISE CRYPTO IND INNOV ETF", purchasePrice: "USD 28.15", marketValue: "USD 17,710.56", gainLoss: "USD -31,943.92", pctChange: -64.33, account: "Fair Fund", shares: 1764, ccy: "USD" },
+    { name: "FIDELITY CON DISCRET ETF", purchasePrice: "USD 80.26", marketValue: "USD 169,260.00", gainLoss: "USD -6,026.75", pctChange: -3.44, account: "STM Malta / RL360", shares: 2184, ccy: "USD" },
+    { name: "ISHARES GLOBAL ENERGY ETF", purchasePrice: "USD 39.19", marketValue: "USD 97,307.22", gainLoss: "USD -1,343.57", pctChange: -1.36, account: "STM Malta / RL360", shares: 2517, ccy: "USD" },
+    { name: "JPMORGAN EQUITY PREMIUM INCOME", purchasePrice: "USD 55.37", marketValue: "USD 181,948.84", gainLoss: "USD -343.86", pctChange: -0.19, account: "STM Malta / RL360", shares: 3292, ccy: "USD" },
+    { name: "GLOBAL X BLOCKCHAIN ETF", purchasePrice: "USD 11.49", marketValue: "USD 134,178.88", gainLoss: "USD 95,259.36", pctChange: 244.76, account: "STM Malta / RL360", shares: 3387.5, ccy: "USD" },
+    { name: "PURPOSE ETHER ETF", purchasePrice: "USD 13.06", marketValue: "USD 69,230.00", gainLoss: "USD -22,201.20", pctChange: -24.28, account: "STM Malta / RL360", shares: 7000, ccy: "USD" },
+    { name: "XTRACKERS MSCI EUROPE HEDGED", purchasePrice: "USD 30.19", marketValue: "USD 269,013.08", gainLoss: "USD 53,240.72", pctChange: 24.67, account: "STM Malta / RL360", shares: 7147, ccy: "USD" },
+    { name: "VANECK DIGITAL TRANSFORMATION", purchasePrice: "USD 6.19", marketValue: "USD 233,809.50", gainLoss: "USD 63,638.47", pctChange: 37.4, account: "STM Malta / RL360", shares: 27507, ccy: "USD" },
   ],
 };
 
-const COMMS = {
-  C00355633:[
-    {id:1,date:"2024-03-15",type:"email",subject:"Q1 Portfolio Review",summary:"Discussed Q1 performance. Client satisfied with VTI allocation. Agreed to maintain strategy.",user:"Sarah Johnson"},
-    {id:2,date:"2024-01-10",type:"call",subject:"January Check-in",summary:"Client queried DBEU underperformance. Explained currency hedging. Client comfortable holding.",user:"James White"},
-    {id:3,date:"2023-12-01",type:"email",subject:"Year-End Statement",summary:"Sent annual portfolio summary and tax documents.",user:"Sarah Johnson"},
-  ],
-  C00356735:[
-    {id:1,date:"2024-02-20",type:"meeting",subject:"Rebalance Discussion",summary:"Agreed to reduce GSPX concentration to 40% of equity portfolio.",user:"James White"},
-    {id:2,date:"2023-11-15",type:"email",subject:"Trustee Fee Invoice",summary:"Sent invoice for annual trustee fee of GBP1,160.",user:"Admin"},
-  ],
-  C00355634:[
-    {id:1,date:"2024-03-20",type:"email",subject:"New Investment Options",summary:"Sent research note on ARKK recovery. Client interested in increasing position.",user:"Sarah Johnson"},
-    {id:2,date:"2024-01-05",type:"call",subject:"New Year Review",summary:"Discussed 2024 outlook. Client wants to reduce DBEU exposure.",user:"James White"},
-  ],
-  C00347223:[
-    {id:1,date:"2024-04-01",type:"meeting",subject:"Quarterly Review",summary:"GSPX remains largest holding. Client flagged interest in increasing fixed income allocation.",user:"James White"},
-    {id:2,date:"2023-07-20",type:"email",subject:"Rebalance Notification",summary:"Notified of rebalance -- sold ERNS and CUKX, bought IS15 and GSPX.",user:"Sarah Johnson"},
+const WITHDRAWALS = {
+  "C00007630": [
+    { dateRequested: "2024-02-02", currency: "USD", requestedAmount: 25060.00, actualPaid: 25060.00, paymentDate: "2024-02-16", type: "Lump Sum" },
+    { dateRequested: "2024-10-05", currency: "USD", requestedAmount: 50040.00, actualPaid: 50040.00, paymentDate: "2024-12-07", type: "Lump Sum" },
+    { dateRequested: "2024-11-12", currency: "USD", requestedAmount: 50040.00, actualPaid: 50040.00, paymentDate: "2025-06-02", type: "Lump Sum" },
   ],
 };
 
-const BLOOMBERG_NEWS = [
-  {id:1,time:"09:32",category:"Markets",headline:"FTSE 100 rises 0.4% as energy stocks lead gains amid oil price rally",source:"Bloomberg",tag:"FTSE"},
-  {id:2,time:"09:18",category:"Fixed Income",headline:"UK gilt yields fall to 3-month low following softer CPI data",source:"Bloomberg",tag:"GILTS"},
-  {id:3,time:"08:55",category:"US Markets",headline:"S&P 500 futures point higher ahead of Fed minutes release",source:"Bloomberg",tag:"SPX"},
-  {id:4,time:"08:41",category:"FX",headline:"Sterling climbs to 1.2650 vs dollar on strong retail sales data",source:"Bloomberg",tag:"GBP"},
-  {id:5,time:"08:22",category:"Asia",headline:"Nikkei 225 closes up 1.1% as yen weakens; BOJ signals policy pause",source:"Bloomberg",tag:"NKY"},
-  {id:6,time:"07:58",category:"Commodities",headline:"Gold holds above $2,300/oz as dollar softens on rate cut expectations",source:"Bloomberg",tag:"XAU"},
-  {id:7,time:"07:33",category:"ETFs",headline:"GSPX: iShares S&P 500 GBP-hedged sees record inflows of GBP420M in May",source:"Bloomberg",tag:"GSPX"},
-  {id:8,time:"07:15",category:"Emerging Markets",headline:"EM equities rally 1.8% as China stimulus measures exceed expectations",source:"Bloomberg",tag:"EMIM"},
+const DISTRIBUTIONS = {
+  "C00007630": [
+    {
+      name: "1st - Interim Distribution",
+      date: "12/16/2025",
+      payments: [
+        { accountNumber: "F00047041", recipient: "STM", date: "12/16/2025", amount: 1878184.34, ccy: "USD" },
+        { accountNumber: "F00040552", recipient: "STM", date: "12/16/2025", amount: 14946.51, ccy: "USD" },
+        { accountNumber: "F00048105", recipient: "STM", date: "12/16/2025", amount: 2942.97, ccy: "USD" },
+      ],
+    },
+  ],
+};
+
+// --- TRANSACTIONS (from MN_TX_For_PAS_test.csv) ------------------------------
+const TXNS = [
+{"id":0,"selector":"Cashflow","tradedate":"27/07/2023","settdate":"27/07/2023","clientId":"C00007630","accountId":"F00048105","txtype":"Deposit","ticker":"CASH-USD","description":"Initial Deposit - Fair Fund","ccy":"USD","qty":0,"consideration":3683.18,"clientnetamt":3683.18,"costprice":0,"costvalue":0},
+{"id":1,"selector":"Cashflow","tradedate":"30/06/2023","settdate":"30/06/2023","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2023 06","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":2,"selector":"Cashflow","tradedate":"30/06/2023","settdate":"30/06/2023","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2023 06","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":3,"selector":"Cashflow","tradedate":"30/06/2023","settdate":"30/06/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2023 06","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":4,"selector":"Dividend","tradedate":"30/06/2023","settdate":"30/06/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLP","description":"CashDiv XLP @USD0.526033per shs","ccy":"USD","qty":0,"consideration":348.76,"clientnetamt":348.76,"costprice":0,"costvalue":348.76},
+{"id":5,"selector":"Dividend","tradedate":"30/06/2023","settdate":"30/06/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLE","description":"CashDiv XLE @USD0.705843per shs","ccy":"USD","qty":0,"consideration":814.54,"clientnetamt":814.54,"costprice":0,"costvalue":814.54},
+{"id":6,"selector":"Dividend","tradedate":"30/06/2023","settdate":"30/06/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"JEPI","description":"CashDiv JEPI @USD0.481433per shs","ccy":"USD","qty":0,"consideration":1583.51,"clientnetamt":1583.51,"costprice":0,"costvalue":1583.51},
+{"id":7,"selector":"Dividend","tradedate":"30/06/2023","settdate":"30/06/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"VGT","description":"CashDiv VGT @USD1.1905per shs","ccy":"USD","qty":0,"consideration":0,"clientnetamt":0,"costprice":0,"costvalue":0},
+{"id":8,"selector":"Dividend","tradedate":"30/06/2023","settdate":"30/06/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"VHT","description":"CashDiv VHT @USD0.826per shs","ccy":"USD","qty":0,"consideration":165.2,"clientnetamt":165.2,"costprice":0,"costvalue":165.2},
+{"id":9,"selector":"Dividend","tradedate":"30/06/2023","settdate":"30/06/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"VTI","description":"CashDiv VTI @USD0.8265per shs","ccy":"USD","qty":0,"consideration":344.35,"clientnetamt":344.35,"costprice":0,"costvalue":344.35},
+{"id":10,"selector":"Dividend","tradedate":"31/03/2023","settdate":"31/03/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLE","description":"CashDiv XLE @USD0.724843per shs","ccy":"USD","qty":0,"consideration":836.07,"clientnetamt":836.07,"costprice":0,"costvalue":836.07},
+{"id":11,"selector":"Dividend","tradedate":"31/03/2023","settdate":"31/03/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLP","description":"CashDiv XLP @USD0.542548per shs","ccy":"USD","qty":0,"consideration":359.51,"clientnetamt":359.51,"costprice":0,"costvalue":359.51},
+{"id":12,"selector":"Dividend","tradedate":"31/03/2023","settdate":"31/03/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"JEPI","description":"CashDiv JEPI @USD0.547265per shs","ccy":"USD","qty":0,"consideration":1799.2,"clientnetamt":1799.2,"costprice":0,"costvalue":1799.2},
+{"id":13,"selector":"Dividend","tradedate":"31/03/2023","settdate":"31/03/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"VHT","description":"CashDiv VHT @USD0.1459per shs","ccy":"USD","qty":0,"consideration":29.18,"clientnetamt":29.18,"costprice":0,"costvalue":29.18},
+{"id":14,"selector":"Dividend","tradedate":"31/03/2023","settdate":"31/03/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"VTI","description":"CashDiv VTI @USD0.7862per shs","ccy":"USD","qty":0,"consideration":327.71,"clientnetamt":327.71,"costprice":0,"costvalue":327.71},
+{"id":15,"selector":"Cashflow","tradedate":"31/03/2023","settdate":"31/03/2023","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2023 03","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":16,"selector":"Cashflow","tradedate":"31/03/2023","settdate":"31/03/2023","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2023 03","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":17,"selector":"Cashflow","tradedate":"31/03/2023","settdate":"31/03/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2023 03","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":18,"selector":"Cashflow","tradedate":"08/06/2023","settdate":"08/06/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Withdrawal","ticker":"CASH-USD","description":"Withdrawal - PCLS","ccy":"USD","qty":0,"consideration":50100.0,"clientnetamt":-50100.0,"costprice":0,"costvalue":0},
+{"id":19,"selector":"Cashflow","tradedate":"28/02/2023","settdate":"28/02/2023","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2023 02","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":20,"selector":"Cashflow","tradedate":"28/02/2023","settdate":"28/02/2023","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2023 02","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":21,"selector":"Cashflow","tradedate":"28/02/2023","settdate":"28/02/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2023 02","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":22,"selector":"Cashflow","tradedate":"31/01/2023","settdate":"31/01/2023","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2023 01","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":23,"selector":"Cashflow","tradedate":"31/01/2023","settdate":"31/01/2023","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2023 01","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":24,"selector":"Trade","tradedate":"19/02/2021","settdate":"23/02/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"DBEU","description":"Bought DBEU 5shs@USD31.1688","ccy":"USD","qty":5,"consideration":155.84,"clientnetamt":-155.84,"costprice":31.17,"costvalue":-155.85},
+{"id":25,"selector":"Cashflow","tradedate":"31/01/2023","settdate":"31/01/2023","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2023 01","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":26,"selector":"Dividend","tradedate":"31/12/2022","settdate":"31/12/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLE","description":"CashDiv XLE @USD0.7462per shs","ccy":"USD","qty":0,"consideration":861.07,"clientnetamt":861.07,"costprice":0,"costvalue":861.07},
+{"id":27,"selector":"Dividend","tradedate":"31/12/2022","settdate":"31/12/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLP","description":"CashDiv XLP @USD0.5568per shs","ccy":"USD","qty":0,"consideration":369.0,"clientnetamt":369.0,"costprice":0,"costvalue":369.0},
+{"id":28,"selector":"Dividend","tradedate":"31/12/2022","settdate":"31/12/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"JEPI","description":"CashDiv JEPI @USD0.5703per shs","ccy":"USD","qty":0,"consideration":1874.19,"clientnetamt":1874.19,"costprice":0,"costvalue":1874.19},
+{"id":29,"selector":"Dividend","tradedate":"31/12/2022","settdate":"31/12/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"VTI","description":"CashDiv VTI @USD0.9305per shs","ccy":"USD","qty":0,"consideration":388.0,"clientnetamt":388.0,"costprice":0,"costvalue":388.0},
+{"id":30,"selector":"Cashflow","tradedate":"31/12/2022","settdate":"31/12/2022","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2022 12","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":31,"selector":"Cashflow","tradedate":"31/12/2022","settdate":"31/12/2022","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 12","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":32,"selector":"Cashflow","tradedate":"31/12/2022","settdate":"31/12/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 12","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":33,"selector":"Trade","tradedate":"09/12/2022","settdate":"13/12/2022","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"JEPI","description":"Rebalance - BUY JEPI 400shs@USD54.04","ccy":"USD","qty":400,"consideration":21616.0,"clientnetamt":-21616.0,"costprice":54.04,"costvalue":-21616.0},
+{"id":34,"selector":"Trade","tradedate":"09/12/2022","settdate":"13/12/2022","clientId":"C00007630","accountId":"F00047041","txtype":"SELL","ticker":"SMH","description":"Rebalance - SELL SMH 35shs@USD221.77","ccy":"USD","qty":-35,"consideration":7761.95,"clientnetamt":7761.95,"costprice":63.39,"costvalue":2218.65},
+{"id":35,"selector":"Cashflow","tradedate":"09/12/2022","settdate":"09/12/2022","clientId":"C00007630","accountId":"F00040552","txtype":"Withdrawal","ticker":"CASH-USD","description":"Withdrawal - One Off","ccy":"USD","qty":0,"consideration":12000.0,"clientnetamt":-12000.0,"costprice":0,"costvalue":0},
+{"id":36,"selector":"Cashflow","tradedate":"30/11/2022","settdate":"30/11/2022","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2022 11","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":37,"selector":"Cashflow","tradedate":"30/11/2022","settdate":"30/11/2022","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 11","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":38,"selector":"Cashflow","tradedate":"30/11/2022","settdate":"30/11/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 11","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":39,"selector":"Dividend","tradedate":"30/09/2022","settdate":"30/09/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLE","description":"CashDiv XLE @USD0.7799per shs","ccy":"USD","qty":0,"consideration":900.34,"clientnetamt":900.34,"costprice":0,"costvalue":900.34},
+{"id":40,"selector":"Dividend","tradedate":"30/09/2022","settdate":"30/09/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLP","description":"CashDiv XLP @USD0.5248per shs","ccy":"USD","qty":0,"consideration":347.94,"clientnetamt":347.94,"costprice":0,"costvalue":347.94},
+{"id":41,"selector":"Dividend","tradedate":"30/09/2022","settdate":"30/09/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"JEPI","description":"CashDiv JEPI @USD0.4902per shs","ccy":"USD","qty":0,"consideration":1043.58,"clientnetamt":1043.58,"costprice":0,"costvalue":1043.58},
+{"id":42,"selector":"Dividend","tradedate":"30/09/2022","settdate":"30/09/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"VTI","description":"CashDiv VTI @USD0.7955per shs","ccy":"USD","qty":0,"consideration":331.45,"clientnetamt":331.45,"costprice":0,"costvalue":331.45},
+{"id":43,"selector":"Cashflow","tradedate":"30/09/2022","settdate":"30/09/2022","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2022 09","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":44,"selector":"Cashflow","tradedate":"30/09/2022","settdate":"30/09/2022","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 09","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":45,"selector":"Cashflow","tradedate":"30/09/2022","settdate":"30/09/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 09","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":46,"selector":"Trade","tradedate":"14/09/2022","settdate":"16/09/2022","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"GBTC","description":"Bought GBTC 200shs@USD13.35","ccy":"USD","qty":200,"consideration":2670.0,"clientnetamt":-2670.0,"costprice":13.35,"costvalue":-2670.0},
+{"id":47,"selector":"Trade","tradedate":"14/09/2022","settdate":"16/09/2022","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"JEPI","description":"Bought JEPI 1000shs@USD53.24","ccy":"USD","qty":1000,"consideration":53240.0,"clientnetamt":-53240.0,"costprice":53.24,"costvalue":-53240.0},
+{"id":48,"selector":"Trade","tradedate":"14/09/2022","settdate":"16/09/2022","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"XLE","description":"Bought XLE 500shs@USD84.86","ccy":"USD","qty":500,"consideration":42430.0,"clientnetamt":-42430.0,"costprice":84.86,"costvalue":-42430.0},
+{"id":49,"selector":"Trade","tradedate":"14/09/2022","settdate":"16/09/2022","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"XLP","description":"Bought XLP 500shs@USD75.85","ccy":"USD","qty":500,"consideration":37925.0,"clientnetamt":-37925.0,"costprice":75.85,"costvalue":-37925.0},
+{"id":50,"selector":"Trade","tradedate":"14/09/2022","settdate":"16/09/2022","clientId":"C00007630","accountId":"F00047041","txtype":"SELL","ticker":"VGT","description":"Sold VGT 35shs@USD350.79","ccy":"USD","qty":-35,"consideration":12277.65,"clientnetamt":12277.65,"costprice":250.0,"costvalue":8750.0},
+{"id":51,"selector":"Cashflow","tradedate":"31/08/2022","settdate":"31/08/2022","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2022 08","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":52,"selector":"Cashflow","tradedate":"31/08/2022","settdate":"31/08/2022","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 08","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":53,"selector":"Cashflow","tradedate":"31/08/2022","settdate":"31/08/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 08","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":54,"selector":"Cashflow","tradedate":"09/12/2022","settdate":"09/12/2022","clientId":"C00007630","accountId":"F00040552","txtype":"Withdrawal","ticker":"CASH-USD","description":"Withdrawal - One Off","ccy":"USD","qty":0,"consideration":12000.0,"clientnetamt":-12000.0,"costprice":0,"costvalue":0},
+{"id":55,"selector":"Dividend","tradedate":"30/06/2022","settdate":"30/06/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLE","description":"CashDiv XLE @USD1.3459per shs","ccy":"USD","qty":0,"consideration":768.17,"clientnetamt":768.17,"costprice":0,"costvalue":768.17},
+{"id":56,"selector":"Dividend","tradedate":"30/06/2022","settdate":"30/06/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLP","description":"CashDiv XLP @USD0.5363per shs","ccy":"USD","qty":0,"consideration":355.48,"clientnetamt":355.48,"costprice":0,"costvalue":355.48},
+{"id":57,"selector":"Cashflow","tradedate":"30/06/2022","settdate":"30/06/2022","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2022 06","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":58,"selector":"Cashflow","tradedate":"30/06/2022","settdate":"30/06/2022","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 06","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":59,"selector":"Cashflow","tradedate":"30/06/2022","settdate":"30/06/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 06","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":60,"selector":"Trade","tradedate":"28/06/2022","settdate":"30/06/2022","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"IXC","description":"Bought IXC 1000shs@USD38.38","ccy":"USD","qty":1000,"consideration":38380.0,"clientnetamt":-38380.0,"costprice":38.38,"costvalue":-38380.0},
+{"id":61,"selector":"Trade","tradedate":"28/06/2022","settdate":"30/06/2022","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"XLE","description":"Bought XLE 154shs@USD84.86","ccy":"USD","qty":154,"consideration":13068.44,"clientnetamt":-13068.44,"costprice":84.86,"costvalue":-13068.44},
+{"id":62,"selector":"Trade","tradedate":"28/06/2022","settdate":"30/06/2022","clientId":"C00007630","accountId":"F00047041","txtype":"SELL","ticker":"BITQ","description":"Sold BITQ 2000shs@USD5.52","ccy":"USD","qty":-2000,"consideration":11040.0,"clientnetamt":11040.0,"costprice":28.15,"costvalue":56300.0},
+{"id":63,"selector":"Trade","tradedate":"28/06/2022","settdate":"30/06/2022","clientId":"C00007630","accountId":"F00047041","txtype":"SELL","ticker":"GBTC","description":"Sold GBTC 900shs@USD13.62","ccy":"USD","qty":-900,"consideration":12258.0,"clientnetamt":12258.0,"costprice":13.35,"costvalue":12015.0},
+{"id":64,"selector":"Cashflow","tradedate":"31/05/2022","settdate":"31/05/2022","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2022 05","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":65,"selector":"Cashflow","tradedate":"31/05/2022","settdate":"31/05/2022","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 05","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":66,"selector":"Cashflow","tradedate":"31/05/2022","settdate":"31/05/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 05","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":67,"selector":"Dividend","tradedate":"31/03/2022","settdate":"31/03/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLP","description":"CashDiv XLP @USD0.4698per shs","ccy":"USD","qty":0,"consideration":311.33,"clientnetamt":311.33,"costprice":0,"costvalue":311.33},
+{"id":68,"selector":"Cashflow","tradedate":"31/03/2022","settdate":"31/03/2022","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2022 03","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":69,"selector":"Cashflow","tradedate":"31/03/2022","settdate":"31/03/2022","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 03","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":70,"selector":"Cashflow","tradedate":"31/03/2022","settdate":"31/03/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 03","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":71,"selector":"Cashflow","tradedate":"28/02/2022","settdate":"28/02/2022","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2022 02","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":72,"selector":"Cashflow","tradedate":"28/02/2022","settdate":"28/02/2022","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 02","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":73,"selector":"Cashflow","tradedate":"28/02/2022","settdate":"28/02/2022","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2022 02","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":74,"selector":"Dividend","tradedate":"31/12/2021","settdate":"31/12/2021","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLP","description":"CashDiv XLP @USD0.5268per shs","ccy":"USD","qty":0,"consideration":349.07,"clientnetamt":349.07,"costprice":0,"costvalue":349.07},
+{"id":75,"selector":"Cashflow","tradedate":"31/12/2021","settdate":"31/12/2021","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2021 12","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":76,"selector":"Cashflow","tradedate":"31/12/2021","settdate":"31/12/2021","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2021 12","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":77,"selector":"Cashflow","tradedate":"31/12/2021","settdate":"31/12/2021","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2021 12","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":78,"selector":"Trade","tradedate":"16/12/2021","settdate":"20/12/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"SMH","description":"Bought SMH 200shs@USD258.62","ccy":"USD","qty":200,"consideration":51724.0,"clientnetamt":-51724.0,"costprice":258.62,"costvalue":-51724.0},
+{"id":79,"selector":"Trade","tradedate":"16/12/2021","settdate":"20/12/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"BITQ","description":"Bought BITQ 2000shs@USD28.15","ccy":"USD","qty":2000,"consideration":56300.0,"clientnetamt":-56300.0,"costprice":28.15,"costvalue":-56300.0},
+{"id":80,"selector":"Trade","tradedate":"16/12/2021","settdate":"20/12/2021","clientId":"C00007630","accountId":"F00047041","txtype":"SELL","ticker":"BITX","description":"Sold BITX 1600shs@USD25.86","ccy":"USD","qty":-1600,"consideration":41376.0,"clientnetamt":41376.0,"costprice":24.26,"costvalue":38816.0},
+{"id":81,"selector":"Trade","tradedate":"16/12/2021","settdate":"20/12/2021","clientId":"C00007630","accountId":"F00047041","txtype":"SELL","ticker":"GBTC","description":"Sold GBTC 700shs@USD29.08","ccy":"USD","qty":-700,"consideration":20356.0,"clientnetamt":20356.0,"costprice":13.35,"costvalue":9345.0},
+{"id":82,"selector":"Trade","tradedate":"16/12/2021","settdate":"20/12/2021","clientId":"C00007630","accountId":"F00047041","txtype":"SELL","ticker":"MSTR","description":"Sold MSTR 200shs@USD348.41","ccy":"USD","qty":-200,"consideration":69682.0,"clientnetamt":69682.0,"costprice":320.18,"costvalue":64036.0},
+{"id":83,"selector":"Trade","tradedate":"19/02/2021","settdate":"23/02/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"SGOV","description":"Bought SGOV 31shs@USD100.0180","ccy":"USD","qty":31,"consideration":3100.56,"clientnetamt":-3100.56,"costprice":100.02,"costvalue":-3100.62},
+{"id":84,"selector":"Cashflow","tradedate":"30/09/2021","settdate":"30/09/2021","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2021 09","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":85,"selector":"Cashflow","tradedate":"30/09/2021","settdate":"30/09/2021","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2021 09","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":86,"selector":"Cashflow","tradedate":"30/09/2021","settdate":"30/09/2021","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2021 09","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":87,"selector":"Dividend","tradedate":"30/09/2021","settdate":"30/09/2021","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLP","description":"CashDiv XLP @USD0.4317per shs","ccy":"USD","qty":0,"consideration":286.09,"clientnetamt":286.09,"costprice":0,"costvalue":286.09},
+{"id":88,"selector":"Trade","tradedate":"28/09/2021","settdate":"30/09/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"MSTR","description":"Bought MSTR 200shs@USD320.18","ccy":"USD","qty":200,"consideration":64036.0,"clientnetamt":-64036.0,"costprice":320.18,"costvalue":-64036.0},
+{"id":89,"selector":"Trade","tradedate":"28/09/2021","settdate":"30/09/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"TSLA","description":"Bought TSLA 200shs@USD769.26","ccy":"USD","qty":200,"consideration":153852.0,"clientnetamt":-153852.0,"costprice":769.26,"costvalue":-153852.0},
+{"id":90,"selector":"Trade","tradedate":"28/09/2021","settdate":"30/09/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"BITX","description":"Bought BITX 1600shs@USD24.26","ccy":"USD","qty":1600,"consideration":38816.0,"clientnetamt":-38816.0,"costprice":24.26,"costvalue":-38816.0},
+{"id":91,"selector":"Trade","tradedate":"28/09/2021","settdate":"30/09/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"GBTC","description":"Bought GBTC 1800shs@USD34.31","ccy":"USD","qty":1800,"consideration":61758.0,"clientnetamt":-61758.0,"costprice":34.31,"costvalue":-61758.0},
+{"id":92,"selector":"Trade","tradedate":"28/09/2021","settdate":"30/09/2021","clientId":"C00007630","accountId":"F00047041","txtype":"SELL","ticker":"DBEU","description":"Sold DBEU 5shs@USD32.79","ccy":"USD","qty":-5,"consideration":163.95,"clientnetamt":163.95,"costprice":31.17,"costvalue":155.85},
+{"id":93,"selector":"Trade","tradedate":"28/09/2021","settdate":"30/09/2021","clientId":"C00007630","accountId":"F00047041","txtype":"SELL","ticker":"SGOV","description":"Sold SGOV 31shs@USD100.02","ccy":"USD","qty":-31,"consideration":3100.62,"clientnetamt":3100.62,"costprice":100.02,"costvalue":3100.62},
+{"id":94,"selector":"Trade","tradedate":"28/09/2021","settdate":"30/09/2021","clientId":"C00007630","accountId":"F00047041","txtype":"SELL","ticker":"VTI","description":"Sold VTI 100shs@USD236.07","ccy":"USD","qty":-100,"consideration":23607.0,"clientnetamt":23607.0,"costprice":197.9,"costvalue":19790.0},
+{"id":95,"selector":"Trade","tradedate":"28/09/2021","settdate":"30/09/2021","clientId":"C00007630","accountId":"F00047041","txtype":"SELL","ticker":"VHT","description":"Sold VHT 160shs@USD252.9","ccy":"USD","qty":-160,"consideration":40464.0,"clientnetamt":40464.0,"costprice":245.57,"costvalue":39291.2},
+{"id":96,"selector":"Cashflow","tradedate":"30/06/2021","settdate":"30/06/2021","clientId":"C00007630","accountId":"F00047041","txtype":"SR Fee","ticker":"CASH-USD","description":"Surrender Rebate Recharge 2021 06","ccy":"USD","qty":0,"consideration":627.36,"clientnetamt":-627.36,"costprice":0,"costvalue":0},
+{"id":97,"selector":"Cashflow","tradedate":"30/06/2021","settdate":"30/06/2021","clientId":"C00007630","accountId":"F00040552","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2021 06","ccy":"USD","qty":0,"consideration":11.33,"clientnetamt":-11.33,"costprice":0,"costvalue":0},
+{"id":98,"selector":"Cashflow","tradedate":"30/06/2021","settdate":"30/06/2021","clientId":"C00007630","accountId":"F00047041","txtype":"Fee","ticker":"Cash-USD","description":"Advisory Fee 2021 06","ccy":"USD","qty":0,"consideration":1694.22,"clientnetamt":-1694.22,"costprice":0,"costvalue":0},
+{"id":99,"selector":"Dividend","tradedate":"30/06/2021","settdate":"30/06/2021","clientId":"C00007630","accountId":"F00047041","txtype":"Dividend","ticker":"XLP","description":"CashDiv XLP @USD0.3793per shs","ccy":"USD","qty":0,"consideration":166.95,"clientnetamt":166.95,"costprice":0,"costvalue":166.95},
+{"id":100,"selector":"Trade","tradedate":"23/06/2021","settdate":"25/06/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"VTI","description":"Bought VTI 100shs@USD197.9","ccy":"USD","qty":100,"consideration":19790.0,"clientnetamt":-19790.0,"costprice":197.9,"costvalue":-19790.0},
+{"id":101,"selector":"Trade","tradedate":"23/06/2021","settdate":"25/06/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"VHT","description":"Bought VHT 200shs@USD245.57","ccy":"USD","qty":200,"consideration":49114.0,"clientnetamt":-49114.0,"costprice":245.57,"costvalue":-49114.0},
+{"id":102,"selector":"Trade","tradedate":"23/06/2021","settdate":"25/06/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"VGT","description":"Bought VGT 35shs@USD350.0","ccy":"USD","qty":35,"consideration":12250.0,"clientnetamt":-12250.0,"costprice":350.0,"costvalue":-12250.0},
+{"id":103,"selector":"Trade","tradedate":"23/06/2021","settdate":"25/06/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"XLP","description":"Bought XLP 163shs@USD75.85","ccy":"USD","qty":163,"consideration":12363.55,"clientnetamt":-12363.55,"costprice":75.85,"costvalue":-12363.55},
+{"id":104,"selector":"Trade","tradedate":"23/06/2021","settdate":"25/06/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"XLE","description":"Bought XLE 346shs@USD57.27","ccy":"USD","qty":346,"consideration":19815.42,"clientnetamt":-19815.42,"costprice":57.27,"costvalue":-19815.42},
+{"id":105,"selector":"Trade","tradedate":"23/06/2021","settdate":"25/06/2021","clientId":"C00007630","accountId":"F00047041","txtype":"BUY","ticker":"SMH","description":"Bought SMH 100shs@USD265.0","ccy":"USD","qty":100,"consideration":26500.0,"clientnetamt":-26500.0,"costprice":265.0,"costvalue":-26500.0},
+{"id":106,"selector":"Cashflow","tradedate":"19/02/2021","settdate":"19/02/2021","clientId":"C00007630","accountId":"F00047041","txtype":"SR","ticker":"CASH-USD","description":"Surrender Rebate","ccy":"USD","qty":0,"consideration":208779.93,"clientnetamt":208779.93,"costprice":0,"costvalue":0},
+{"id":107,"selector":"Cashflow","tradedate":"19/02/2021","settdate":"19/02/2021","clientId":"C00007630","accountId":"F00047041","txtype":"Deposit","ticker":"CASH-USD","description":"Initial Deposit","ccy":"USD","qty":0,"consideration":1533348.06,"clientnetamt":1533348.06,"costprice":0,"costvalue":0},
+{"id":108,"selector":"Cashflow","tradedate":"01/02/2021","settdate":"01/02/2021","clientId":"C00007630","accountId":"F00040552","txtype":"Deposit","ticker":"CASH-USD","description":"Initial Deposit","ccy":"USD","qty":0,"consideration":83683.18,"clientnetamt":83683.18,"costprice":0,"costvalue":0},
 ];
 
-const MARKET_DATA = {
-  indices:[
-    {name:"S&P 500",ticker:"SPX",value:5312.8,change:+18.4,pct:+0.35,direction:"up"},
-    {name:"FTSE 100",ticker:"UKX",value:8247.3,change:-12.1,pct:-0.15,direction:"down"},
-    {name:"Euro Stoxx 50",ticker:"SX5E",value:4921.6,change:+31.2,pct:+0.64,direction:"up"},
-    {name:"Nikkei 225",ticker:"NKY",value:38842.0,change:+418.5,pct:+1.09,direction:"up"},
-    {name:"Hang Seng",ticker:"HSI",value:18452.1,change:-88.3,pct:-0.48,direction:"down"},
-  ],
-  risers:[
-    {ticker:"ARKK",name:"ARK Innovation ETF",change:+4.21,pct:+8.4},
-    {ticker:"EMIM",name:"iShares Core EM IMI",change:+0.52,pct:+2.1},
-    {ticker:"VAPX",name:"Vanguard Asia Pacific",change:+0.38,pct:+1.9},
-    {ticker:"IAU",name:"iShares Gold Trust",change:+0.61,pct:+1.6},
-    {ticker:"GSPX",name:"iShares S&P 500 GBP-H",change:+0.12,pct:+1.5},
-  ],
-  fallers:[
-    {ticker:"DBEU",name:"Xtrackers MSCI Europe Hedged",change:-0.84,pct:-2.2},
-    {ticker:"LGLV",name:"SPDR US Large Cap Low Vol",change:-2.18,pct:-1.5},
-    {ticker:"CUKX",name:"iShares FTSE 100",change:-1.92,pct:-1.4},
-    {ticker:"VYM",name:"Vanguard High Dividend",change:-1.41,pct:-1.3},
-    {ticker:"IJPH",name:"iShares Japan GBP-H",change:-1.02,pct:-1.1},
-  ],
-  trends:[
-    {title:"Fed Rate Path",body:"Markets pricing 2 cuts in H2 2024. Bond ETFs outperforming as yield curve flattens. VCSH and SCHO positioned well."},
-    {title:"GBP Strength",body:"Sterling at 14-month high vs EUR. GBP-hedged products (GSPX, IJPH) benefiting. Watch GBPUSD at 1.27 resistance."},
-    {title:"EM Revival",body:"China stimulus driving EM rally. EMIM and VAPX seeing strong momentum. Risk-on sentiment building in Asia."},
-    {title:"Gold Breakout",body:"IAU above $38 on Fed pivot hopes and geopolitical demand. Technical breakout with $40 target in view."},
-  ],
-};
+// --- HELPERS -----------------------------------------------------------------
+const fmt = (n, dp=2) => { if (n == null) return "--"; return Math.abs(n).toLocaleString("en-GB",{minimumFractionDigits:dp,maximumFractionDigits:dp}); };
+const pct = (n) => { if (n == null) return "--"; return (n >= 0 ? "+" : "") + fmt(n) + "%"; };
+const posColor = (n) => n >= 0 ? C.green : C.red;
+const posBg = (n) => n >= 0 ? C.greenBg : C.redBg;
 
-// --- HELPERS -------------------------------------------------------
-const sign = (n) => { if (n >= 0) { return "+"; } return "-"; };
-const posColor = (n) => { if (n >= 0) { return C.green; } return C.red; };
-const posBg = (n) => { if (n >= 0) { return C.greenBg; } return C.redBg; };
-const dirColor = (dir) => { if (dir === "up") { return C.green; } return C.red; };
-const fmt = (n, dp=2) => { if (n == null) { return "--"; } return Math.abs(n).toLocaleString("en-GB",{minimumFractionDigits:dp,maximumFractionDigits:dp}); };
-const fmtC = (n, ccy, selectedCcy) => {
-  if (n == null) { return "--"; }
-  const sym = CCY_SYMBOLS[selectedCcy] || "$";
-  const converted = convertAmount(n, ccy, selectedCcy);
-  return sym+fmt(converted);
-};
-const pct = (n) => { if (n == null) { return "--"; } if (n >= 0) { return "+"+fmt(n)+"%"; } return fmt(n)+"%"; };
-const calcPL = (cost, val) => val - cost;
-const calcPct = (cost, val) => { if (cost === 0) { return 0; } return ((val-cost)/Math.abs(cost))*100; };
-
-const clientTotals = (id, selectedCcy) => {
-  const hs = HOLDINGS[id]||[];
-  const totalValue = hs.reduce((s,h)=>s+convertAmount(h.value,h.ccy,selectedCcy),0);
-  const totalCost = hs.reduce((s,h)=>s+convertAmount(h.cost,h.ccy,selectedCcy),0);
-  return {totalValue,totalCost,pl:totalValue-totalCost,pctReturn:calcPct(totalCost,totalValue)};
-};
-
-const buildChart = (id, selectedCcy) => {
-  const base = {
-    "C00355633":[285000,340000,410000,490000,430000,510000,590000,null],
-    "C00356735":[620000,695000,780000,890000,810000,870000,980000,null],
-    "C00355634":[180000,220000,260000,320000,290000,330000,380000,null],
-    "C00347223":[950000,1050000,1150000,1280000,1180000,1250000,1350000,null],
+// --- STYLED ATOMS ------------------------------------------------------------
+const Badge = ({children, color="info"}) => {
+  const cols = {
+    info:{bg:"#E6F9F8",text:"#009990"}, success:{bg:"#D1FAE5",text:"#065F46"},
+    warning:{bg:"#FEF3C7",text:"#92400E"}, error:{bg:"#FEE2E2",text:"#991B1B"},
+    navy:{bg:"#1E3A5F",text:"#93C5FD"},
   };
-  const labels=["Nov '20","Mar '21","Jun '21","Dec '21","Jun '22","Dec '22","Jun '23","Now"];
-  const vals = base[id]||[];
-  const final = clientTotals(id,selectedCcy).totalValue;
-  return labels.map((d,i)=>({
-    date:d,
-    value: i===7 ? Math.round(final) : Math.round(convertAmount(vals[i]||0,"USD",selectedCcy)),
-  }));
-};
-
-// --- STYLED ATOMS -------------------------------------------------
-const Badge=({children,color="info"})=>{
-  const cols={
-    info:{bg:"#E6F9F8",text:"#009990"},success:{bg:"#D1FAE5",text:"#065F46"},
-    warning:{bg:"#FEF3C7",text:"#92400E"},error:{bg:"#FEE2E2",text:"#991B1B"},
-    navy:{bg:"#1E3A5F",text:"#93C5FD"},gold:{bg:"#FEF5E7",text:"#B45309"},
-    up:{bg:"#D1FAE5",text:"#065F46"},down:{bg:"#FEE2E2",text:"#991B1B"},
-  };
-  const col=cols[color]||cols.info;
+  const col = cols[color] || cols.info;
   return <span style={{background:col.bg,color:col.text,fontSize:11,fontWeight:600,padding:"3px 9px",borderRadius:100,display:"inline-block",letterSpacing:0.3,whiteSpace:"nowrap"}}>{children}</span>;
 };
 
-const Btn=({children,onClick,variant="primary",small})=>{
-  const s={
+const Btn = ({children, onClick, variant="primary", small}) => {
+  const s = {
     primary:{background:C.teal,color:C.white,border:"none"},
     secondary:{background:"transparent",color:C.navy,border:"1.5px solid "+C.navy},
     ghost:{background:"transparent",color:C.teal,border:"1.5px solid "+C.teal},
-    danger:{background:C.red,color:C.white,border:"none"},
-    dark:{background:C.navy,color:C.white,border:"none"},
   };
   return <button onClick={onClick} style={{...s[variant],fontFamily:"'Inter',sans-serif",fontSize:small?11:13,fontWeight:500,padding:small?"5px 11px":"8px 15px",borderRadius:6,cursor:"pointer",display:"inline-flex",alignItems:"center",gap:5}}>{children}</button>;
 };
 
-const Modal=({title,onClose,children,wide})=>(
+const Modal = ({title, onClose, children}) => (
   <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
-    <div style={{background:C.white,borderRadius:12,padding:28,width:wide?700:520,maxWidth:"97vw",maxHeight:"90vh",overflowY:"auto"}}>
+    <div style={{background:C.white,borderRadius:12,padding:28,width:560,maxWidth:"97vw",maxHeight:"90vh",overflowY:"auto"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
         <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:18,fontWeight:600,color:C.navy}}>{title}</div>
         <button onClick={onClose} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:C.faint,lineHeight:1}}>x</button>
@@ -429,2376 +355,640 @@ const Modal=({title,onClose,children,wide})=>(
   </div>
 );
 
-const FldInput=({label,value,onChange,placeholder,type="text"})=>(
-  <div style={{marginBottom:13}}>
-    <label style={{fontSize:11,fontWeight:600,color:C.text,display:"block",marginBottom:4}}>{label}</label>
-    <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} style={{width:"100%",padding:"8px 11px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",outline:"none",boxSizing:"border-box",color:C.navy}}/>
-  </div>
-);
-
-const FldSelect=({label,value,onChange,options})=>(
-  <div style={{marginBottom:13}}>
-    <label style={{fontSize:11,fontWeight:600,color:C.text,display:"block",marginBottom:4}}>{label}</label>
-    <select value={value} onChange={e=>onChange(e.target.value)} style={{width:"100%",padding:"8px 11px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",outline:"none",color:C.navy,background:C.white}}>
-      {options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}
-    </select>
-  </div>
-);
-
-const StatCard=({label,value,sub,trend,dark})=>(
-  <div style={{background:dark?C.navyMid:C.white,border:"0.5px solid "+(dark?"rgba(255,255,255,0.08)":C.silver),borderRadius:10,padding:"15px 17px"}}>
-    <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:dark?"rgba(255,255,255,0.38)":C.faint,marginBottom:5}}>{label}</div>
-    <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:21,fontWeight:600,color:dark?C.white:C.navy,letterSpacing:-0.4,lineHeight:1.2}}>{value}</div>
-    {sub&&<div style={{fontSize:12,color:trend==="up"?C.green:trend==="down"?C.red:(dark?"rgba(255,255,255,0.38)":C.faint),marginTop:3}}>{sub}</div>}
-  </div>
-);
-
-// --- SORTABLE TABLE -----------------------------------------------
-const SortIcon=({dir})=><span style={{fontSize:9,marginLeft:4,opacity:0.6}}>{dir==="asc"?"^":dir==="desc"?"v":"^v"}</span>;
-
-const useSortFilter=(data,defaultSort)=>{
-  const [sort,setSort]=useState(defaultSort||{col:null,dir:"asc"});
-  const [filters,setFilters]=useState({});
-  const [search,setSearch]=useState("");
-
-  const toggleSort=(col)=>setSort(s=>s.col===col?{col,dir:s.dir==="asc"?"desc":"asc"}:{col,dir:"asc"});
-  const setFilter=(col,val)=>setFilters(f=>({...f,[col]:val}));
-
-  const result=useMemo(()=>{
-    let d=[...data];
-    if(search){const q=search.toLowerCase();d=d.filter(r=>Object.values(r).some(v=>String(v).toLowerCase().includes(q)));}
-    Object.entries(filters).forEach(([col,val])=>{if(val&&val!=="all")d=d.filter(r=>String(r[col]).toLowerCase().includes(val.toLowerCase()));});
-    if(sort.col){
-      d.sort((a,b)=>{
-        const av=a[sort.col],bv=b[sort.col];
-        if(av==null)return 1;if(bv==null)return -1;
-        const cmp=typeof av==="number"?av-bv:String(av).localeCompare(String(bv));
-        return sort.dir==="asc"?cmp:-cmp;
-      });
-    }
-    return d;
-  },[data,search,filters,sort]);
-
-  return{result,sort,toggleSort,filters,setFilter,search,setSearch};
-};
-
-// --- LOGO SVG (i-Convergence wordmark) --------------------------
-const Logo=({size=28})=>(
-  <svg width={size*5.2} height={size} viewBox="0 0 156 30" fill="none" xmlns="http://www.w3.org/2000/svg">
-    <text x="0" y="22" fontFamily="Space Grotesk, sans-serif" fontWeight="700" fontSize="20" letterSpacing="-0.5">
-      <tspan fill="#00B8B0">i-</tspan><tspan fill="#FFFFFF">Convergence</tspan>
-    </text>
-  </svg>
-);
-
-// --- NAVIGATION --------------------------------------------------
-const CCYSelector=({selectedCcy,onChange,compact})=>(
-  <div style={{display:"flex",alignItems:"center",gap:compact?2:6,background:"rgba(255,255,255,0.08)",borderRadius:7,padding:"2px 3px"}}>
-    {["USD","GBP","EUR","CNY"].map(c=>(
-      <button key={c} onClick={()=>onChange(c)} style={{background:selectedCcy===c?C.teal:"transparent",color:selectedCcy===c?C.white:"rgba(255,255,255,0.55)",border:"none",borderRadius:5,padding:compact?"3px 6px":"4px 9px",fontSize:compact?11:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",transition:"all 0.15s"}}>
+// --- NAV ---------------------------------------------------------------------
+const CCYSelector = ({selectedCcy, onChange}) => (
+  <div style={{display:"flex",alignItems:"center",gap:2,background:"rgba(255,255,255,0.08)",borderRadius:7,padding:"2px 3px"}}>
+    {["USD","GBP","EUR"].map(c=>(
+      <button key={c} onClick={()=>onChange(c)} style={{background:selectedCcy===c?C.teal:"transparent",color:selectedCcy===c?C.white:"rgba(255,255,255,0.55)",border:"none",borderRadius:5,padding:"3px 8px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
         {c}
       </button>
     ))}
   </div>
 );
 
-const Nav=({section,setSection,selectedCcy,setCcy,user,logout})=>{
-  const isMobile=useIsMobile();
-  const [menuOpen,setMenuOpen]=useState(false);
-  const items=[
-    {key:"dashboard",label:"Dashboard",icon:"◈"},
-    {key:"clients",label:"Clients",icon:"◉"},
-    {key:"pricing",label:"Pricing",icon:"◈"},
-    {key:"risk",label:"Risk",icon:"◎"},
-    {key:"withdrawals",label:"Withdrawals",icon:"◇"},
-    {key:"connect",label:"Connect",icon:"◆"},
-    {key:"users",label:"Users",icon:"◎"},
+const Nav = ({section, setSection, selectedCcy, setCcy, user, logout}) => {
+  const isMobile = useIsMobile();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const items = [
+    {key:"dashboard", label:"Dashboard", icon:"◈"},
+    {key:"clients", label:"Clients", icon:"◉"},
+    {key:"withdrawals", label:"Withdrawals", icon:"◇"},
+    {key:"connect", label:"Connect", icon:"◆"},
+    {key:"users", label:"Users", icon:"◎"},
   ];
-  const handleNav=(key)=>{setSection(key);setMenuOpen(false);};
-  return(
+  const handleNav = (key) => { setSection(key); setMenuOpen(false); };
+  return (
     <>
       <div style={{background:C.navy,display:"flex",alignItems:"center",padding:"0 16px",height:54,position:"sticky",top:0,zIndex:200,flexShrink:0,borderBottom:"1px solid rgba(0,184,176,0.15)"}}>
-        <div style={{marginRight:isMobile?10:20,flexShrink:0}}>
-          <Logo size={isMobile?19:24}/>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?16:20,fontWeight:700,color:C.white,marginRight:isMobile?10:24,flexShrink:0}}>
+          <span style={{color:C.teal}}>i-</span>Convergence
         </div>
-        {!isMobile&&items.filter(i=>{
-          if(i.key==="users") return user && user.isAdviser;
-          return true;
-        }).map(i=>(
+        {!isMobile && items.filter(i=>i.key!=="users" || (user&&user.isAdviser)).map(i=>(
           <button key={i.key} onClick={()=>handleNav(i.key)} style={{background:"none",border:"none",color:section===i.key?C.teal:"rgba(255,255,255,0.5)",fontSize:12,fontWeight:section===i.key?600:400,cursor:"pointer",padding:"0 9px",height:"100%",borderBottom:section===i.key?"2px solid "+C.teal:"2px solid transparent",transition:"all 0.15s",whiteSpace:"nowrap",fontFamily:"'Inter',sans-serif"}}>
             {i.label}
           </button>
         ))}
         <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:isMobile?8:12}}>
-          <CCYSelector selectedCcy={selectedCcy} onChange={setCcy} compact={isMobile}/>
-          {!isMobile&&<>
-            <div style={{width:1,height:24,background:"rgba(255,255,255,0.1)"}}/>
-            <div style={{display:"flex",alignItems:"center",gap:5}}>
-              <div style={{width:7,height:7,borderRadius:"50%",background:C.teal}}/>
-              <span style={{fontSize:11,color:"rgba(255,255,255,0.4)"}}>Bloomberg</span>
-            </div>
-          </>}
-          <div style={{position:"relative"}}>
-            <div style={{width:32,height:32,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:12,fontWeight:600,flexShrink:0,cursor:"pointer"}} title={user&&user.email}>
-              {user?user.name.split(" ").map(n=>n[0]).join("").slice(0,2):"?"}
-            </div>
-          </div>
-          {!isMobile&&user&&<button onClick={logout} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",color:"rgba(255,255,255,0.6)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>Sign out</button>}
-          {isMobile&&(
-            <button onClick={()=>setMenuOpen(o=>!o)} style={{background:"none",border:"none",cursor:"pointer",padding:6,display:"flex",flexDirection:"column",gap:5,width:36,height:36,alignItems:"center",justifyContent:"center"}}>
-              <div style={{width:22,height:2,background:C.white,transition:"transform 0.2s",transform:menuOpen?"rotate(45deg) translate(0,7px)":"none"}}/>
-              <div style={{width:22,height:2,background:C.white,opacity:menuOpen?0:1,transition:"opacity 0.15s"}}/>
-              <div style={{width:22,height:2,background:C.white,transition:"transform 0.2s",transform:menuOpen?"rotate(-45deg) translate(0,-7px)":"none"}}/>
-            </button>
-          )}
+          <CCYSelector selectedCcy={selectedCcy} onChange={setCcy}/>
+          {!isMobile && <div style={{width:32,height:32,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:12,fontWeight:600,cursor:"pointer"}} title={user&&user.email}>
+            {user?user.name.split(" ").map(n=>n[0]).join("").slice(0,2):"?"}
+          </div>}
+          {!isMobile && user && <button onClick={logout} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",color:"rgba(255,255,255,0.6)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>Sign out</button>}
+          {isMobile && <button onClick={()=>setMenuOpen(o=>!o)} style={{background:"none",border:"none",cursor:"pointer",padding:4,display:"flex",flexDirection:"column",gap:4,width:32,height:32,alignItems:"center",justifyContent:"center"}}>
+            <div style={{width:20,height:2,background:C.white,transition:"transform 0.2s",transform:menuOpen?"rotate(45deg) translate(0,6px)":"none"}}/>
+            <div style={{width:20,height:2,background:C.white,opacity:menuOpen?0:1}}/>
+            <div style={{width:20,height:2,background:C.white,transition:"transform 0.2s",transform:menuOpen?"rotate(-45deg) translate(0,-6px)":"none"}}/>
+          </button>}
         </div>
       </div>
-      {isMobile&&menuOpen&&(
+      {isMobile && menuOpen && (
         <>
           <div onClick={()=>setMenuOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.45)",zIndex:190,top:54}}/>
-          <div style={{position:"fixed",top:54,left:0,right:0,background:C.navy,zIndex:195,borderBottom:"2px solid "+C.teal,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}}>
-            {items.filter(i=>{
-              if(i.key==="trustee") return user && (user.roles||[]).includes("trustee");
-              if(i.key==="users")   return user && user.isAdviser;
-              return true;
-            }).map(i=>(
+          <div style={{position:"fixed",top:54,left:0,right:0,background:C.navy,zIndex:195,borderBottom:"2px solid "+C.teal}}>
+            {items.filter(i=>i.key!=="users"||(user&&user.isAdviser)).map(i=>(
               <button key={i.key} onClick={()=>handleNav(i.key)} style={{display:"flex",alignItems:"center",gap:14,width:"100%",background:section===i.key?C.navyLight:"none",border:"none",borderBottom:"0.5px solid rgba(255,255,255,0.07)",color:section===i.key?C.teal:C.white,fontSize:15,fontWeight:section===i.key?600:400,cursor:"pointer",padding:"15px 20px",fontFamily:"'Inter',sans-serif",textAlign:"left",boxSizing:"border-box"}}>
-                <span style={{fontSize:20,width:28,textAlign:"center"}}>{i.icon}</span>
+                <span style={{fontSize:18,width:24,textAlign:"center"}}>{i.icon}</span>
                 <span>{i.label}</span>
-                {section===i.key&&<div style={{marginLeft:"auto",width:6,height:6,borderRadius:"50%",background:C.teal}}/>}
               </button>
             ))}
-            <div style={{padding:"12px 20px",borderTop:"0.5px solid rgba(255,255,255,0.1)",display:"flex",alignItems:"center",gap:8}}>
-              <div style={{width:7,height:7,borderRadius:"50%",background:C.teal}}/>
-              <span style={{fontSize:12,color:"rgba(255,255,255,0.4)"}}>Bloomberg connected</span>
+            <div style={{padding:"12px 20px",borderTop:"0.5px solid rgba(255,255,255,0.1)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{fontSize:12,color:"rgba(255,255,255,0.4)"}}>{user&&user.email}</span>
+              <button onClick={logout} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",color:"rgba(255,255,255,0.6)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>Sign out</button>
             </div>
           </div>
         </>
-      )}
-      {isMobile&&(
-        <div style={{position:"fixed",bottom:0,left:0,right:0,background:C.navy,borderTop:"1px solid rgba(0,184,176,0.2)",display:"flex",zIndex:150,height:60}}>
-          {items.slice(0,4).map(i=>(
-            <button key={i.key} onClick={()=>handleNav(i.key)} style={{flex:1,background:section===i.key?"rgba(0,184,176,0.1)":"none",border:"none",borderTop:section===i.key?"2px solid "+C.teal:"2px solid transparent",color:section===i.key?C.teal:"rgba(255,255,255,0.45)",fontSize:9,fontWeight:section===i.key?600:400,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,fontFamily:"'Inter',sans-serif",padding:"4px 0"}}>
-              <span style={{fontSize:19,lineHeight:1}}>{i.icon}</span>
-              <span>{i.label}</span>
-            </button>
-          ))}
-          <button onClick={()=>setMenuOpen(o=>!o)} style={{flex:1,background:menuOpen?"rgba(0,184,176,0.1)":"none",border:"none",borderTop:menuOpen?"2px solid "+C.teal:"2px solid transparent",color:menuOpen?C.teal:"rgba(255,255,255,0.45)",fontSize:9,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:3,fontFamily:"'Inter',sans-serif",padding:"4px 0"}}>
-            <span style={{fontSize:19,lineHeight:1}}>=</span>
-            <span>More</span>
-          </button>
-        </div>
       )}
     </>
   );
 };
 
+// --- DASHBOARD ---------------------------------------------------------------
+const Dashboard = ({setSection, setSelectedClient, selectedCcy}) => {
+  const isMobile = useIsMobile();
+  const sym = CCY_SYMBOLS[selectedCcy] || "$";
+  const totalAUM = Object.values(VALUATIONS).reduce((s,v) => s + convertAmount(v.totalAssetValuation, "USD", selectedCcy), 0);
+  const totalCash = Object.values(VALUATIONS).reduce((s,v) => s + convertAmount(v.totalCashBalance, "USD", selectedCcy), 0);
+  const totalLiabilities = Object.values(VALUATIONS).reduce((s,v) => s + convertAmount(v.totalLiabilities, "USD", selectedCcy), 0);
 
-const Dashboard=({setSection,setSelectedClient,selectedCcy})=>{
-  const isMobile=useIsMobile();
-  const sym=CCY_SYMBOLS[selectedCcy]||"$";
-  const totalAUM=CLIENTS.reduce((s,c)=>s+clientTotals(c.id,selectedCcy).totalValue,0);
-  const totalCost=CLIENTS.reduce((s,c)=>s+clientTotals(c.id,selectedCcy).totalCost,0);
-  const totalPL=totalAUM-totalCost;
-  const totalTxns=TXNS.length;
-  const totalDivs=TXNS.filter(t=>t.txtype==="Dividend").reduce((s,t)=>s+convertAmount(t.consideration,t.ccy,selectedCcy),0);
-
-  return(
-    <div style={{padding:24}}>
-      <div style={{marginBottom:20}}>
+  return (
+    <div style={{padding:isMobile?"14px 12px":24}}>
+      <div style={{marginBottom:18}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:3,textTransform:"uppercase",color:C.teal,marginBottom:3}}>Platform overview</div>
-        <div style={{display:"flex",alignItems:"baseline",gap:12}}>
-          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:24,fontWeight:700,color:C.navy,letterSpacing:-0.5}}>Aggregate dashboard</div>
-          <div style={{fontSize:12,color:C.faint}}>Reporting in <strong style={{color:C.navy}}>{selectedCcy}</strong>{" . "}{sym}{fmt(FX["GBPUSD"]||1.2618,4)}{" = GBP1.00"}</div>
-        </div>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?20:26,fontWeight:700,color:C.navy}}>Aggregate Dashboard</div>
       </div>
 
-      <div style={{background:C.navy,borderRadius:12,padding:"22px 26px",marginBottom:14,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:18}}>
+      <div style={{background:C.navy,borderRadius:12,padding:isMobile?"16px":24,marginBottom:14,display:"flex",flexWrap:"wrap",gap:16,justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
           <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:5}}>Total AUM ({selectedCcy})</div>
-          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:34,fontWeight:700,color:C.white,letterSpacing:-1}}>{sym}{fmt(totalAUM,0)}</div>
-          <div style={{fontSize:13,color:totalPL>= 0 ?"#34D399":"#F87171",marginTop:3}}>
-            {totalPL>= 0 ?"^":"v"}{" "}{sym}{fmt(Math.abs(totalPL),0)}{" - "}{pct(calcPct(totalCost,totalAUM))}{" overall return"}
-          </div>
+          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?28:36,fontWeight:700,color:C.white,letterSpacing:-1}}>{sym}{fmt(totalAUM,0)}</div>
+          <div style={{fontSize:12,color:"rgba(255,255,255,0.5)",marginTop:4}}>Net of {sym}{fmt(totalLiabilities,0)} liabilities</div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <StatCard label="Active clients" value={CLIENTS.length.toString()} dark/>
-          <StatCard label="Total transactions" value={totalTxns.toLocaleString()} dark/>
-          <StatCard label="Avg. return" value={pct(calcPct(totalCost,totalAUM))} sub="across all clients" trend={totalPL>=0?"up":"down"} dark/>
-          <StatCard label="Compliance" value={Math.round(CLIENTS.filter(c=>c.verified).length/CLIENTS.length*100)+"%"} sub={CLIENTS.filter(c=>c.verified).length+" of "+CLIENTS.length+" verified"} trend="up" dark/>
-        </div>
-      </div>
-
-      {isMobile ? (
-        <div style={{marginBottom:14,marginLeft:-16,marginRight:-16}}>
-          <div
-            id="client-scroll"
-            onScroll={e=>{
-              const el=e.target;
-              const cardW=el.scrollWidth/CLIENTS.length;
-              const active=Math.round(el.scrollLeft/cardW);
-              document.querySelectorAll(".client-dot").forEach((d,i)=>{
-                d.style.width=i===active?"18px":"5px";
-                d.style.background=i===active?"#00B8B0":"#C4CDD8";
-              });
-            }}
-            style={{overflowX:"auto",WebkitOverflowScrolling:"touch",scrollbarWidth:"none",msOverflowStyle:"none",paddingLeft:16,paddingRight:16,paddingBottom:8,scrollSnapType:"x mandatory",display:"flex",gap:12}}>
-            {CLIENTS.map(c=>{
-              const t=clientTotals(c.id,selectedCcy);
-              return(
-                <div key={c.id} onClick={()=>{setSelectedClient(c.id);setSection("clients");}}
-                  style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:14,padding:"16px 18px",cursor:"pointer",minWidth:"calc(80vw)",maxWidth:320,flexShrink:0,boxShadow:"0 2px 12px rgba(0,0,0,0.08)",scrollSnapAlign:"start"}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                    <div style={{display:"flex",alignItems:"center",gap:10}}>
-                      <div style={{width:38,height:38,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:13,fontWeight:700,flexShrink:0}}>
-                        {c.name.split(" ").map(n=>n[0]).join("")}
-                      </div>
-                      <div>
-                        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.navy}}>{c.name}</div>
-                        <div style={{fontSize:10,color:C.faint}}>{c.code}</div>
-                      </div>
-                    </div>
-                    <Badge color={c.verified?"success":"warning"}>{c.verified?"OK":"?"}</Badge>
-                  </div>
-                  <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:26,fontWeight:700,color:C.navy,letterSpacing:-0.5,marginBottom:6}}>{sym}{fmt(t.totalValue,0)}</div>
-                  <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
-                    <span style={{fontSize:13,fontWeight:600,color:posColor(t.pl)}}>{sign(t.pl)}{sym}{fmt(Math.abs(t.pl),0)}</span>
-                    <span style={{fontSize:12,color:posColor(t.pctReturn),background:posBg(t.pctReturn),padding:"2px 7px",borderRadius:4,fontWeight:600}}>{pct(t.pctReturn)}</span>
-                  </div>
-                  <div style={{borderTop:"0.5px solid "+C.silver,paddingTop:10,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                    <span style={{fontSize:11,color:C.faint}}>Tap to view portfolio</span>
-                    <span style={{fontSize:12,color:C.teal,fontWeight:600}}>View &rarr;</span>
-                  </div>
-                </div>
-              );
-            })}
-            <div style={{minWidth:4,flexShrink:0}}/>
-          </div>
-          <div style={{display:"flex",justifyContent:"center",gap:5,marginTop:8}}>
-            {CLIENTS.map((_,i)=>(
-              <div key={i} className="client-dot" style={{width:i===0?18:5,height:3,borderRadius:2,background:i===0?C.teal:C.silverMid,transition:"all 0.2s"}}/>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:14}}>
-          {CLIENTS.map(c=>{
-            const t=clientTotals(c.id,selectedCcy);
-            return(
-              <div key={c.id} onClick={()=>{setSelectedClient(c.id);setSection("clients");}} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:16,cursor:"pointer"}}
-                onMouseEnter={e=>e.currentTarget.style.borderColor=C.teal}
-                onMouseLeave={e=>e.currentTarget.style.borderColor=C.silver}>
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
-                  <div>
-                    <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.navy}}>{c.name}</div>
-                    <div style={{fontSize:10,color:C.faint}}>{c.code}</div>
-                  </div>
-                  <Badge color={c.verified?"success":"warning"}>{c.verified?"OK":"Pending"}</Badge>
-                </div>
-                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.navy}}>{sym}{fmt(t.totalValue,0)}</div>
-                <div style={{display:"flex",gap:10,marginTop:6}}>
-                  <span style={{fontSize:12,color:posColor(t.pl),fontWeight:600}}>{t.pl>= 0 ?"+":""}{sym}{fmt(Math.abs(t.pl),0)}</span>
-                  <span style={{fontSize:12,color:posColor(t.pctReturn)}}>{pct(t.pctReturn)}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14,marginBottom:14}}>
-        <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:18}}>
-          <div style={{fontSize:11,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",marginBottom:14}}>AUM by client ({selectedCcy})</div>
-          <ResponsiveContainer width="100%" height={isMobile?180:150}>
-            <BarChart data={CLIENTS.map(c=>({name:c.name.split(" ")[0],val:Math.round(clientTotals(c.id,selectedCcy).totalValue*0.001)}))}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.silver}/>
-              <XAxis dataKey="name" tick={{fontSize:11,fill:C.faint}}/>
-              <YAxis tick={{fontSize:10,fill:C.faint}}/>
-              <Tooltip formatter={v=>[sym+v+"k","AUM"]}/>
-              <Bar dataKey="val" fill={C.teal} radius={[3,3,0,0]}/>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:18}}>
-          <div style={{fontSize:11,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",marginBottom:10}}>Market snapshot</div>
-          {MARKET_DATA.indices.map(i=>(
-            <div key={i.ticker} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"0.5px solid "+C.silver}}>
-              <span style={{fontSize:12,fontWeight:600,color:C.navy}}>{i.name}</span>
-              <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                <span style={{fontFamily:"Space Grotesk,sans-serif",fontSize:13,fontWeight:600,color:C.navy}}>{i.value.toLocaleString()}</span>
-                <span style={{fontSize:12,color:dirColor(i.direction),fontWeight:600}}>{i.direction==="up"?"^":"v"} {Math.abs(i.pct).toFixed(2)+"%"}</span>
-              </div>
+          {[
+            {label:"Active clients", value:CLIENTS.length.toString()},
+            {label:"Cash balance", value:sym+fmt(totalCash,0)},
+            {label:"Total liabilities", value:sym+fmt(totalLiabilities,0)},
+            {label:"Verified", value:CLIENTS.filter(c=>c.verified).length+" of "+CLIENTS.length},
+          ].map(s=>(
+            <div key={s.label} style={{background:C.navyMid,border:"0.5px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"12px 14px"}}>
+              <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:4}}>{s.label}</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:18,fontWeight:600,color:C.white}}>{s.value}</div>
             </div>
           ))}
         </div>
       </div>
+
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(280px,1fr))",gap:12,marginBottom:14}}>
+        {CLIENTS.map(c => {
+          const val = VALUATIONS[c.id];
+          const aum = val ? convertAmount(val.totalAssetValuation, "USD", selectedCcy) : 0;
+          const liab = val ? convertAmount(val.totalLiabilities, "USD", selectedCcy) : 0;
+          const net = aum - liab;
+          return (
+            <div key={c.id} onClick={()=>{setSelectedClient(c.id);setSection("clients");}}
+              style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:18,cursor:"pointer",transition:"border-color 0.15s",boxShadow:"0 2px 8px rgba(0,0,0,0.05)"}}
+              onMouseEnter={e=>e.currentTarget.style.borderColor=C.teal}
+              onMouseLeave={e=>e.currentTarget.style.borderColor=C.silver}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:38,height:38,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:13,fontWeight:700}}>
+                    {c.name.split(" ").map(n=>n[0]).join("")}
+                  </div>
+                  <div>
+                    <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.navy}}>{c.name}</div>
+                    <div style={{fontSize:10,color:C.faint}}>{c.primaryCode}</div>
+                  </div>
+                </div>
+                <Badge color={c.verified?"success":"warning"}>{c.verified?"Verified":"Pending"}</Badge>
+              </div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,color:C.navy,letterSpacing:-0.5,marginBottom:4}}>{sym}{fmt(aum,0)}</div>
+              <div style={{fontSize:12,color:C.faint}}>Net: {sym}{fmt(net,0)} after liabilities</div>
+              <div style={{marginTop:10,fontSize:11,color:C.teal,fontWeight:600}}>View portfolio &rarr;</div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };
 
-// --- GOOGLE SHEETS CONFIG ----------------------------------------
-const SHEETS_CONFIG = { SPREADSHEET_ID: "", API_KEY: "", SHEET_NAME: "Withdrawals" };
-const sheetsConfigured = () => SHEETS_CONFIG.SPREADSHEET_ID && SHEETS_CONFIG.API_KEY;
+// --- CLIENT DETAIL -----------------------------------------------------------
+const ClientDetail = ({clientId, onBack, selectedCcy}) => {
+  const isMobile = useIsMobile();
+  const [tab, setTab] = useState("valuation");
+  const [search, setSearch] = useState("");
+  const [txFilter, setTxFilter] = useState("all");
+  const sym = CCY_SYMBOLS[selectedCcy] || "$";
 
-const appendToSheet = async (row) => {
-  if (!sheetsConfigured()) return { ok: false, error: "not_configured" };
-  try {
-    const url = "https://sheets.googleapis.com/v4/spreadsheets/"+SHEETS_CONFIG.SPREADSHEET_ID+"/values/"+SHEETS_CONFIG.SHEET_NAME+"!A:J:append?valueInputOption=USER_ENTERED&key="+SHEETS_CONFIG.API_KEY;
-    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ values: [row] }) });
-    return res.ok ? { ok: true } : { ok: false, error: await res.text() };
-  } catch(e) { return { ok: false, error: e.message }; }
-};
-
-const readSheetStatuses = async () => {
-  if (!sheetsConfigured()) return {};
-  try {
-    const url = "https://sheets.googleapis.com/v4/spreadsheets/"+SHEETS_CONFIG.SPREADSHEET_ID+"/values/"+SHEETS_CONFIG.SHEET_NAME+"!A:J?key="+SHEETS_CONFIG.API_KEY;
-    const res = await fetch(url);
-    if (!res.ok) return {};
-    const data = await res.json();
-    const rows = (data.values || []).slice(1);
-    const map = {};
-    rows.forEach(r => { if (r[0]) map[r[0]] = r[9] || "Pending"; });
-    return map;
-  } catch(e) { return {}; }
-};
-
-// --- MARKET DATA CONFIG -------------------------------------------
-// Configure your preferred data source. Priority: Yahoo Finance -> Alpha Vantage -> Bloomberg -> Static
-const MARKET_CONFIG = {
-  // Yahoo Finance via RapidAPI (free tier: 500 req/month)
-  // Get key at: rapidapi.com/apidojo/api/yahoo-finance1
-  YAHOO_RAPIDAPI_KEY: "",   // paste your RapidAPI key here
-  YAHOO_HOST: "apidojo-yahoo-finance-v1.p.rapidapi.com",
-
-  // Alpha Vantage (free tier: 25 req/day)
-  // Get key at: alphavantage.co/support/#api-key
-  ALPHA_VANTAGE_KEY: "",    // paste your Alpha Vantage key here
-
-  // Bloomberg (paid - only if you have a Bloomberg API subscription)
-  BLOOMBERG_KEY: "",        // paste your Bloomberg API key here
-
-  // Which source to use: "yahoo" | "alphavantage" | "bloomberg" | "static"
-  PRIMARY_SOURCE: "static", // change to "yahoo" once you add your RapidAPI key
-
-  // Cache duration in minutes (avoids burning free tier quota)
-  CACHE_MINUTES: 15,
-};
-
-// Your portfolio tickers mapped to Yahoo Finance symbols
-const TICKER_MAP = {
-  // GBP-listed ETFs (London Stock Exchange)
-  "GSPX":  "GSPX.L",  "IS15":  "IS15.L",  "GILS":  "GILS.L",
-  "EMIM":  "EMIM.L",  "EUXS":  "EUXS.L",  "ERNS":  "ERNS.L",
-  "XGIG":  "XGIG.L",  "AGBP":  "AGBP.L",  "IJPH":  "IJPH.L",
-  "CSH2":  "CSH2.L",  "CUKX":  "CUKX.L",  "VGOV":  "VGOV.L",
-  // USD-listed ETFs (NYSE/NASDAQ)
-  "VTI":   "VTI",     "VWO":   "VWO",     "VPL":   "VPL",
-  "VCSH":  "VCSH",    "SCHP":  "SCHP",    "SCHO":  "SCHO",
-  "DBEU":  "DBEU",    "BNDX":  "BNDX",    "VAPX":  "VAPX",
-  "ARKK":  "ARKK",    "SGOV":  "SGOV",    "LGLV":  "LGLV",
-  "VYM":   "VYM",     "IAU":   "IAU",
-  // FX pairs
-  "GBPUSD": "GBPUSD=X", "GBPEUR": "GBPEUR=X",
-  "EURUSD": "EURUSD=X", "USDGBP": "USDGBP=X",
-  "USDCNY": "USDCNY=X",
-};
-
-// Index symbols for market snapshot
-const INDEX_MAP = {
-  "S&P 500":     "^GSPC",
-  "FTSE 100":    "^FTSE",
-  "Euro Stoxx":  "^STOXX50E",
-  "Nikkei 225":  "^N225",
-  "Hang Seng":   "^HSI",
-};
-
-// --- MARKET DATA CACHE --------------------------------------------
-const _priceCache = {};
-const _cacheTime = {};
-
-const isCacheValid = (key) => {
-  if (!_cacheTime[key]) return false;
-  return (Date.now() - _cacheTime[key]) < MARKET_CONFIG.CACHE_MINUTES * 60 * 1000;
-};
-
-const setCacheEntry = (key, value) => {
-  _priceCache[key] = value;
-  _cacheTime[key] = Date.now();
-};
-
-// --- YAHOO FINANCE FETCHER ----------------------------------------
-const fetchYahooQuotes = async (symbols) => {
-  if (!MARKET_CONFIG.YAHOO_RAPIDAPI_KEY) return null;
-  try {
-    // apidojo Yahoo Finance v1 - batch quotes endpoint
-    const joined = symbols.slice(0, 20).join(",");
-    const url = "https://"+MARKET_CONFIG.YAHOO_HOST+"/market/v2/get-quotes?region=US&lang=en&symbols="+encodeURIComponent(joined);
-    const res = await fetch(url, {
-      headers: {
-        "x-rapidapi-key": MARKET_CONFIG.YAHOO_RAPIDAPI_KEY,
-        "x-rapidapi-host": MARKET_CONFIG.YAHOO_HOST,
-      }
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    const quotes = (data.quoteResponse && data.quoteResponse.result) || [];
-    const prices = {};
-    quotes.forEach(q => {
-      prices[q.symbol] = {
-        price: q.regularMarketPrice,
-        change: q.regularMarketChange,
-        changePct: q.regularMarketChangePercent,
-        name: q.shortName || q.longName || q.symbol,
-        currency: q.currency || "USD",
-      };
-    });
-    return Object.keys(prices).length > 0 ? prices : null;
-  } catch(e) { return null; }
-};
-
-const fetchYahooNews = async () => {
-  if (!MARKET_CONFIG.YAHOO_RAPIDAPI_KEY) return null;
-  try {
-    // apidojo get-summaries endpoint for market news
-    const url = "https://"+MARKET_CONFIG.YAHOO_HOST+"/market/get-summary?region=US&lang=en";
-    const res = await fetch(url, {
-      headers: {
-        "x-rapidapi-key": MARKET_CONFIG.YAHOO_RAPIDAPI_KEY,
-        "x-rapidapi-host": MARKET_CONFIG.YAHOO_HOST,
-      }
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    // Try news from marketSummaryAndSparkResponse or fall back to get-trending news
-    const newsUrl = "https://"+MARKET_CONFIG.YAHOO_HOST+"/news/list?region=US&snippetCount=10";
-    const newsRes = await fetch(newsUrl, {
-      headers: {
-        "x-rapidapi-key": MARKET_CONFIG.YAHOO_RAPIDAPI_KEY,
-        "x-rapidapi-host": MARKET_CONFIG.YAHOO_HOST,
-      }
-    });
-    if (!newsRes.ok) return null;
-    const newsData = await newsRes.json();
-    const items = (newsData.items && newsData.items.result) || [];
-    return items.slice(0,10).map((item,i) => ({
-      id: i+1,
-      time: item.published_at ? new Date(item.published_at*1000).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}) : "--",
-      category: (item.main_category) || "Markets",
-      headline: item.title,
-      source: item.publisher && item.publisher.name || "Yahoo Finance",
-      tag: "LIVE",
-      url: item.link,
-    })).filter(n => n.headline);
-  } catch(e) { return null; }
-};
-
-// --- ALPHA VANTAGE FETCHER ----------------------------------------
-const fetchAlphaQuote = async (symbol) => {
-  if (!MARKET_CONFIG.ALPHA_VANTAGE_KEY) return null;
-  const cacheKey = "av_"+symbol;
-  if (isCacheValid(cacheKey)) return _priceCache[cacheKey];
-  try {
-    const url = "https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol="+symbol+"&apikey="+MARKET_CONFIG.ALPHA_VANTAGE_KEY;
-    const res = await fetch(url);
-    const data = await res.json();
-    const q = data["Global Quote"];
-    if (!q || !q["05. price"]) return null;
-    const result = {
-      price: parseFloat(q["05. price"]),
-      change: parseFloat(q["09. change"]),
-      changePct: parseFloat(q["10. change percent"]),
-    };
-    setCacheEntry(cacheKey, result);
-    return result;
-  } catch(e) { return null; }
-};
-
-const fetchAlphaFX = async (fromCcy, toCcy) => {
-  if (!MARKET_CONFIG.ALPHA_VANTAGE_KEY) return null;
-  const cacheKey = "avfx_"+fromCcy+toCcy;
-  if (isCacheValid(cacheKey)) return _priceCache[cacheKey];
-  try {
-    const url = "https://www.alphavantage.co/query?function=CURRENCY_EXCHANGE_RATE&from_currency="+fromCcy+"&to_currency="+toCcy+"&apikey="+MARKET_CONFIG.ALPHA_VANTAGE_KEY;
-    const res = await fetch(url);
-    const data = await res.json();
-    const rate = data["Realtime Currency Exchange Rate"];
-    if (!rate) return null;
-    const result = { price: parseFloat(rate["5. Exchange Rate"]) };
-    setCacheEntry(cacheKey, result);
-    return result;
-  } catch(e) { return null; }
-};
-
-// --- UNIFIED PRICE FETCHER ----------------------------------------
-const fetchLivePrices = async (tickers) => {
-  const source = MARKET_CONFIG.PRIMARY_SOURCE;
-
-  if (source === "yahoo" && MARKET_CONFIG.YAHOO_RAPIDAPI_KEY) {
-    const yahooSymbols = tickers.map(t => TICKER_MAP[t] || t).filter(Boolean);
-    const cacheKey = "yahoo_batch";
-    if (isCacheValid(cacheKey)) return _priceCache[cacheKey];
-    const prices = await fetchYahooQuotes(yahooSymbols);
-    if (prices) { setCacheEntry(cacheKey, prices); return prices; }
-  }
-
-  if (source === "alphavantage" && MARKET_CONFIG.ALPHA_VANTAGE_KEY) {
-    const prices = {};
-    // Alpha Vantage is one-at-a-time - fetch key tickers only to preserve quota
-    const keyTickers = tickers.slice(0, 5);
-    for (const ticker of keyTickers) {
-      const result = await fetchAlphaQuote(TICKER_MAP[ticker] || ticker);
-      if (result) prices[TICKER_MAP[ticker] || ticker] = result;
-    }
-    return Object.keys(prices).length > 0 ? prices : null;
-  }
-
-  return null; // falls back to static PRICES array
-};
-
-// --- MARKET DATA HOOK ---------------------------------------------
-const useMarketData = () => {
-  const [livePrices, setLivePrices] = useState(null);
-  const [liveNews, setLiveNews] = useState(null);
-  const [marketStatus, setMarketStatus] = useState("static");
-  const [lastUpdated, setLastUpdated] = useState(null);
-
-  const refresh = async () => {
-    setMarketStatus("loading");
-    const tickers = Object.keys(TICKER_MAP);
-
-    // Try Yahoo Finance first
-    if (MARKET_CONFIG.YAHOO_RAPIDAPI_KEY) {
-      const yahooSymbols = [...new Set(tickers.map(t => TICKER_MAP[t]))];
-      const prices = await fetchYahooQuotes(yahooSymbols);
-      if (prices) {
-        setLivePrices(prices);
-        setMarketStatus("yahoo");
-        setLastUpdated(new Date());
-        // Also fetch news
-        const news = await fetchYahooNews();
-        if (news && news.length > 0) setLiveNews(news);
-        return;
-      }
-    }
-
-    // Fallback to Alpha Vantage
-    if (MARKET_CONFIG.ALPHA_VANTAGE_KEY) {
-      setMarketStatus("alphavantage");
-      // Fetch FX rates at minimum
-      const gbpusd = await fetchAlphaFX("GBP","USD");
-      const gbpeur = await fetchAlphaFX("GBP","EUR");
-      if (gbpusd || gbpeur) {
-        const prices = {};
-        if (gbpusd) prices["GBPUSD=X"] = gbpusd;
-        if (gbpeur) prices["GBPEUR=X"] = gbpeur;
-        setLivePrices(prices);
-        setLastUpdated(new Date());
-        return;
-      }
-    }
-
-    setMarketStatus("static");
-  };
-
-  useEffect(() => {
-    refresh();
-    // Auto-refresh every CACHE_MINUTES
-    const interval = setInterval(refresh, MARKET_CONFIG.CACHE_MINUTES * 60 * 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Get price for a ticker (live or static fallback)
-  const getPrice = (ticker) => {
-    if (livePrices) {
-      const yahooSym = TICKER_MAP[ticker];
-      const liveData = livePrices[yahooSym] || livePrices[ticker];
-      if (liveData) return liveData.price;
-    }
-    // Static fallback from PRICES array
-    const staticEntry = PRICES.find(p => p.ticker === ticker);
-    return staticEntry ? staticEntry.price : null;
-  };
-
-  return { livePrices, liveNews, marketStatus, lastUpdated, refresh, getPrice };
-};
-
-
-// --- SESSION STORAGE FOR WITHDRAWAL REQUESTS ---------------------
-const WD_KEY = "iconv_wd_requests";
-const loadRequests = async () => {
-  try {
-    const val = sessionStorage.getItem(WD_KEY);
-    return val ? JSON.parse(val) : [];
-  } catch(e) { return []; }
-};
-const saveRequests = async (reqs) => {
-  try { sessionStorage.setItem(WD_KEY, JSON.stringify(reqs)); } catch(e) {}
-};
-
-// --- RISK & SUITABILITY DATA --------------------------------------
-const ASSET_CLASS = {
-  "GSPX":"Equity","VTI":"Equity","VWO":"Equity","VPL":"Equity","DBEU":"Equity",
-  "EMIM":"Equity","EUXS":"Equity","CUKX":"Equity","VAPX":"Equity","IJPH":"Equity",
-  "ARKK":"Equity","VYM":"Equity","LGLV":"Equity","BNDX":"Fixed Income",
-  "VCSH":"Fixed Income","SCHP":"Fixed Income","SCHO":"Fixed Income","IS15":"Fixed Income",
-  "GILS":"Fixed Income","ERNS":"Fixed Income","XGIG":"Fixed Income","AGBP":"Fixed Income",
-  "VGOV":"Fixed Income","SGOV":"Fixed Income","CSH2":"Cash","IAU":"Commodity",
-};
-const RISK_MANDATES = {
-  1:{label:"Very Cautious",equity:[0,20],fi:[60,100],cash:[0,40],commodity:[0,5]},
-  2:{label:"Cautious",equity:[0,30],fi:[55,85],cash:[0,35],commodity:[0,5]},
-  3:{label:"Cautious Balanced",equity:[10,40],fi:[45,75],cash:[0,30],commodity:[0,10]},
-  4:{label:"Balanced",equity:[20,50],fi:[35,65],cash:[0,25],commodity:[0,10]},
-  5:{label:"Moderate",equity:[30,60],fi:[25,55],cash:[0,25],commodity:[0,10]},
-  6:{label:"Moderate Growth",equity:[40,70],fi:[15,45],cash:[0,20],commodity:[0,15]},
-  7:{label:"Growth",equity:[50,80],fi:[10,35],cash:[0,15],commodity:[0,15]},
-  8:{label:"Aggressive Growth",equity:[60,90],fi:[0,25],cash:[0,10],commodity:[0,20]},
-  9:{label:"Aggressive",equity:[70,100],fi:[0,15],cash:[0,10],commodity:[0,20]},
-  10:{label:"Speculative",equity:[80,100],fi:[0,10],cash:[0,10],commodity:[0,25]},
-};
-const RISK_COLOURS = {1:"#1d4ed8",2:"#2563eb",3:"#0891b2",4:"#0d9488",5:"#059669",6:"#65a30d",7:"#ca8a04",8:"#d97706",9:"#dc2626",10:"#9f1239"};
-const RISK_LABELS = {1:"Very Cautious",2:"Cautious",3:"Cautious Balanced",4:"Balanced",5:"Moderate",6:"Moderate Growth",7:"Growth",8:"Aggressive Growth",9:"Aggressive",10:"Speculative"};
-
-const DEFAULT_RISK_PROFILES = {
-  "C00355633":{score:5,notes:"Moderate risk tolerance. Prefers global equity diversification. Review due Q3 2024.",reviewed:"2024-01-10"},
-  "C00356735":{score:4,notes:"Balanced mandate. Concerned about EM volatility. Reviewed post-rebalance Feb 2024.",reviewed:"2024-02-20"},
-  "C00355634":{score:6,notes:"Moderate growth. Comfortable with tactical positions (ARKK). Annual review due Oct 2024.",reviewed:"2024-01-05"},
-  "C00347223":{score:4,notes:"Balanced. Large cash position reflects near-term liquidity need. Review pending.",reviewed:"2024-04-01"},
-};
-
-const computeCompliance = (clientId, profiles) => {
-  const profile = profiles[clientId] || DEFAULT_RISK_PROFILES[clientId];
-  if (!profile) return null;
-  const mandate = RISK_MANDATES[profile.score];
-  const hs = HOLDINGS[clientId] || [];
-  const total = hs.reduce((s,h)=>s+h.value, 0);
-  if (!total) return null;
-  const byClass = {};
-  hs.forEach(h => { const ac = ASSET_CLASS[h.ticker]||"Other"; byClass[ac]=(byClass[ac]||0)+h.value; });
-  const getPct = ac => Math.round((byClass[ac]||0)/total*100);
-  const eqPct=getPct("Equity"), fiPct=getPct("Fixed Income"), cashPct=getPct("Cash"), comPct=getPct("Commodity");
-  const flags = [];
-  if (eqPct<mandate.equity[0]) flags.push({type:"warning",msg:"Equity "+eqPct+"% below mandate minimum of "+mandate.equity[0]+"%"});
-  if (eqPct>mandate.equity[1]) flags.push({type:"error",msg:"Equity "+eqPct+"% exceeds mandate maximum of "+mandate.equity[1]+"%"});
-  if (fiPct<mandate.fi[0]) flags.push({type:"warning",msg:"Fixed income "+fiPct+"% below mandate minimum of "+mandate.fi[0]+"%"});
-  if (fiPct>mandate.fi[1]) flags.push({type:"error",msg:"Fixed income "+fiPct+"% exceeds mandate maximum of "+mandate.fi[1]+"%"});
-  if (cashPct>mandate.cash[1]) flags.push({type:"warning",msg:"Cash "+cashPct+"% above mandate maximum of "+mandate.cash[1]+"%"});
-  if (comPct>mandate.commodity[1]) flags.push({type:"warning",msg:"Commodity "+comPct+"% exceeds mandate limit of "+mandate.commodity[1]+"%"});
-  return { eqPct, fiPct, cashPct, comPct, flags, mandate, byClass, total };
-};
-
-// --- DEFAULT DOCS ------------------------------------------------
-const DEFAULT_DOCS = {
-  "C00355633":[
-    {id:1,name:"KYC Verification -- Lightfoot.pdf",type:"KYC",date:"2020-10-01",size:"1.2 MB",uploader:"Admin"},
-    {id:2,name:"Suitability Letter 2024.pdf",type:"Suitability",date:"2024-01-10",size:"320 KB",uploader:"James White"},
-    {id:3,name:"Investment Mandate -- Moderate.pdf",type:"Mandate",date:"2020-10-01",size:"245 KB",uploader:"Admin"},
-  ],
-  "C00356735":[
-    {id:1,name:"KYC -- Starkie Verified.pdf",type:"KYC",date:"2021-02-15",size:"980 KB",uploader:"Admin"},
-    {id:2,name:"Suitability Assessment 2024.pdf",type:"Suitability",date:"2024-02-20",size:"410 KB",uploader:"James White"},
-    {id:3,name:"Risk Disclosure Statement.pdf",type:"Risk Disclosure",date:"2021-02-15",size:"190 KB",uploader:"Admin"},
-  ],
-  "C00355634":[
-    {id:1,name:"KYC -- Chris Pauls.pdf",type:"KYC",date:"2020-10-01",size:"1.1 MB",uploader:"Admin"},
-    {id:2,name:"Moderate Growth Mandate.pdf",type:"Mandate",date:"2020-10-01",size:"260 KB",uploader:"Admin"},
-    {id:3,name:"Authorisation Letter 2024.pdf",type:"Authorisation",date:"2024-01-05",size:"155 KB",uploader:"James White"},
-  ],
-  "C00347223":[
-    {id:1,name:"KYC -- Hash Murji.pdf",type:"KYC",date:"2020-09-01",size:"1.4 MB",uploader:"Admin"},
-    {id:2,name:"Balanced Mandate Agreement.pdf",type:"Mandate",date:"2020-09-01",size:"290 KB",uploader:"Admin"},
-    {id:3,name:"Suitability Review Q1 2024.pdf",type:"Suitability",date:"2024-04-01",size:"375 KB",uploader:"James White"},
-    {id:4,name:"Risk Disclosure -- Signed.pdf",type:"Risk Disclosure",date:"2020-09-01",size:"185 KB",uploader:"Admin"},
-  ],
-};
-
-// --- DEFAULT ALERTS ----------------------------------------------
-const buildDefaultAlerts = () => [
-  {id:1,clientId:"C00347223",client:"Hash Murji",type:"Concentration",severity:"warning",msg:"GSPX represents 14.3% of total portfolio -- above 10% single-position threshold",triggered:"2024-06-01",status:"open"},
-  {id:2,clientId:"C00347223",client:"Hash Murji",type:"Mandate",severity:"error",msg:"Equity allocation 23% below balanced mandate minimum of 20%",triggered:"2024-05-28",status:"open"},
-  {id:3,clientId:"C00356735",client:"Lyndsey Starkie",type:"Cash",severity:"warning",msg:"Cash position 47.5% of portfolio -- exceeds balanced mandate cash limit of 25%",triggered:"2024-06-01",status:"open"},
-  {id:4,clientId:"C00355634",client:"Chris Pauls",type:"Performance",severity:"info",msg:"DBEU down 15.3% from cost -- consider reviewing European hedged position",triggered:"2024-05-20",status:"open"},
-  {id:5,clientId:"C00355633",client:"Michael Lightfoot",type:"Review",severity:"info",msg:"Annual suitability review due -- last reviewed 10 Jan 2024",triggered:"2024-06-01",status:"open"},
-];
-
-// --- CLIENT DETAIL -------------------------------------------------
-
-// --- DISTRIBUTION DATA (sample - will come from OneDrive/Excel) --------
-const DISTRIBUTIONS = {
-  "C00355633": [
-    { id: "D1", name: "Distribution 1", date: "2023-06-15", totalAmount: 25000, ccy: "USD",
-      payments: [
-        { date: "2023-06-15", amount: 12500, reference: "D1-A", status: "Paid", method: "Bank Transfer" },
-        { date: "2023-09-15", amount: 12500, reference: "D1-B", status: "Paid", method: "Bank Transfer" },
-      ]
-    },
-    { id: "D2", name: "Distribution 2", date: "2024-01-10", totalAmount: 30000, ccy: "USD",
-      payments: [
-        { date: "2024-01-10", amount: 15000, reference: "D2-A", status: "Paid", method: "Bank Transfer" },
-        { date: "2024-04-10", amount: 15000, reference: "D2-B", status: "Pending", method: "Bank Transfer" },
-      ]
-    },
-  ],
-  "C00356735": [
-    { id: "D1", name: "Distribution 1", date: "2023-03-01", totalAmount: 50000, ccy: "GBP",
-      payments: [
-        { date: "2023-03-01", amount: 25000, reference: "D1-A", status: "Paid", method: "Bank Transfer" },
-        { date: "2023-09-01", amount: 25000, reference: "D1-B", status: "Paid", method: "Bank Transfer" },
-      ]
-    },
-  ],
-  "C00355634": [
-    { id: "D1", name: "Distribution 1", date: "2023-08-20", totalAmount: 40000, ccy: "USD",
-      payments: [
-        { date: "2023-08-20", amount: 20000, reference: "D1-A", status: "Paid", method: "Bank Transfer" },
-        { date: "2024-02-20", amount: 20000, reference: "D1-B", status: "Paid", method: "Bank Transfer" },
-      ]
-    },
-    { id: "D2", name: "Distribution 2", date: "2024-03-15", totalAmount: 45000, ccy: "USD",
-      payments: [
-        { date: "2024-03-15", amount: 22500, reference: "D2-A", status: "Paid", method: "Bank Transfer" },
-        { date: "2024-09-15", amount: 22500, reference: "D2-B", status: "Scheduled", method: "Bank Transfer" },
-      ]
-    },
-  ],
-  "C00347223": [
-    { id: "D1", name: "Distribution 1", date: "2022-12-01", totalAmount: 100000, ccy: "GBP",
-      payments: [
-        { date: "2022-12-01", amount: 50000, reference: "D1-A", status: "Paid", method: "Bank Transfer" },
-        { date: "2023-06-01", amount: 50000, reference: "D1-B", status: "Paid", method: "Bank Transfer" },
-      ]
-    },
-    { id: "D2", name: "Distribution 2", date: "2023-12-01", totalAmount: 120000, ccy: "GBP",
-      payments: [
-        { date: "2023-12-01", amount: 60000, reference: "D2-A", status: "Paid", method: "Bank Transfer" },
-        { date: "2024-06-01", amount: 60000, reference: "D2-B", status: "Pending", method: "Bank Transfer" },
-      ]
-    },
-    { id: "D3", name: "Distribution 3", date: "2024-06-01", totalAmount: 80000, ccy: "GBP",
-      payments: [
-        { date: "2024-06-01", amount: 40000, reference: "D3-A", status: "Scheduled", method: "Bank Transfer" },
-        { date: "2024-12-01", amount: 40000, reference: "D3-B", status: "Scheduled", method: "Bank Transfer" },
-      ]
-    },
-  ],
-};
-
-const statusColour = (s) => {
-  if (s === "Paid") return C.green;
-  if (s === "Pending") return C.amber;
-  if (s === "Scheduled") return C.faint;
-  return C.navy;
-};
-const statusBg = (s) => {
-  if (s === "Paid") return C.greenBg;
-  if (s === "Pending") return C.amberBg;
-  if (s === "Scheduled") return C.silver;
-  return C.silver;
-};
-
-const DistributionTab = ({ clientId, selectedCcy, sym }) => {
-  const [selectedDist, setSelectedDist] = useState(null);
+  const client = CLIENTS.find(c => c.id === clientId);
+  const val = VALUATIONS[clientId];
+  const holdings = HOLDINGS[clientId] || [];
+  const withdrawals = WITHDRAWALS[clientId] || [];
   const distributions = DISTRIBUTIONS[clientId] || [];
+  const txns = TXNS.filter(t => t.clientId === clientId);
 
-  if (distributions.length === 0) {
-    return (
-      <div style={{padding:32,textAlign:"center",color:C.faint}}>
-        <div style={{fontSize:32,marginBottom:12}}>◇</div>
-        <div style={{fontSize:14,fontWeight:600,color:C.navy,marginBottom:6}}>No distributions</div>
-        <div style={{fontSize:12}}>No distribution payments have been recorded for this client.</div>
-      </div>
-    );
-  }
+  const filteredTxns = useMemo(() => {
+    let d = txns;
+    if (txFilter !== "all") d = d.filter(t => t.selector.toLowerCase() === txFilter || t.txtype.toLowerCase() === txFilter);
+    if (search) d = d.filter(t => [t.description, t.ticker, t.txtype].some(v => v && v.toLowerCase().includes(search.toLowerCase())));
+    return d;
+  }, [txns, txFilter, search]);
+
+  if (!client) return <div style={{padding:24}}>Client not found</div>;
+
+  const tabs = [["valuation","Valuation"],["holdings","Holdings"],["transactions","Transactions"],["withdrawals","Withdrawals"],["distribution","Distribution"],["crm","CRM"]];
 
   return (
-    <div>
-      <div style={{display:"flex",gap:10,marginBottom:20,flexWrap:"wrap"}}>
-        {distributions.map(d => (
-          <button key={d.id} onClick={() => setSelectedDist(selectedDist === d.id ? null : d.id)}
-            style={{background:selectedDist===d.id?C.navy:C.white,color:selectedDist===d.id?C.white:C.navy,border:"1.5px solid "+(selectedDist===d.id?C.navy:C.silver),borderRadius:10,padding:"12px 20px",cursor:"pointer",fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,fontSize:13,textAlign:"left",minWidth:160}}>
-            <div style={{fontSize:11,fontWeight:600,color:selectedDist===d.id?"rgba(255,255,255,0.6)":C.faint,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>{d.name}</div>
-            <div style={{fontSize:18,fontWeight:700,letterSpacing:-0.3}}>{CCY_SYMBOLS[d.ccy]||d.ccy}{fmt(d.totalAmount,0)}</div>
-            <div style={{fontSize:11,color:selectedDist===d.id?"rgba(255,255,255,0.5)":C.faint,marginTop:3}}>{d.date}</div>
-          </button>
-        ))}
-      </div>
+    <div style={{padding:isMobile?"10px 12px":24}}>
+      <button onClick={onBack} style={{background:"none",border:"none",color:C.teal,fontSize:13,cursor:"pointer",marginBottom:14,padding:0,display:"flex",alignItems:"center",gap:4,fontFamily:"'Inter',sans-serif"}}>
+        &larr; All clients
+      </button>
 
-      {selectedDist && (() => {
-        const dist = distributions.find(d => d.id === selectedDist);
-        if (!dist) return null;
-        const totalPaid = dist.payments.filter(p => p.status === "Paid").reduce((s,p) => s+p.amount, 0);
-        const totalPending = dist.payments.filter(p => p.status !== "Paid").reduce((s,p) => s+p.amount, 0);
-        return (
-          <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:20}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18,flexWrap:"wrap",gap:12}}>
-              <div>
-                <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:16,fontWeight:700,color:C.navy,marginBottom:4}}>{dist.name}</div>
-                <div style={{fontSize:12,color:C.faint}}>Initiated {dist.date} · {dist.payments.length} payment{dist.payments.length!==1?"s":""}</div>
-              </div>
-              <div style={{display:"flex",gap:16}}>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase"}}>Total</div>
-                  <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:20,fontWeight:700,color:C.navy}}>{CCY_SYMBOLS[dist.ccy]||dist.ccy}{fmt(dist.totalAmount,0)}</div>
-                </div>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase"}}>Paid</div>
-                  <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:20,fontWeight:700,color:C.green}}>{CCY_SYMBOLS[dist.ccy]||dist.ccy}{fmt(totalPaid,0)}</div>
-                </div>
-                {totalPending > 0 && <div style={{textAlign:"right"}}>
-                  <div style={{fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase"}}>Remaining</div>
-                  <div style={{fontFamily:"'Space Grotesk',sans-serif",fontSize:20,fontWeight:700,color:C.amber}}>{CCY_SYMBOLS[dist.ccy]||dist.ccy}{fmt(totalPending,0)}</div>
-                </div>}
-              </div>
-            </div>
-
-            <div style={{width:"100%",height:6,background:C.silver,borderRadius:3,marginBottom:20,overflow:"hidden"}}>
-              <div style={{width:(totalPaid/dist.totalAmount*100)+"%",height:"100%",background:C.green,borderRadius:3,transition:"width 0.4s"}}/>
-            </div>
-
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
-              <thead>
-                <tr style={{borderBottom:"1.5px solid "+C.silver}}>
-                  {["Payment","Date","Reference","Amount","Method","Status"].map(h=>(
-                    <th key={h} style={{textAlign:"left",padding:"6px 10px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase"}}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {dist.payments.map((p,i) => (
-                  <tr key={i} style={{borderBottom:"0.5px solid "+C.silver}}>
-                    <td style={{padding:"10px 10px",fontWeight:600,color:C.navy}}>Payment {i+1}</td>
-                    <td style={{padding:"10px 10px",color:C.text}}>{p.date}</td>
-                    <td style={{padding:"10px 10px",color:C.faint,fontFamily:"monospace",fontSize:11}}>{p.reference}</td>
-                    <td style={{padding:"10px 10px",fontWeight:600,color:C.navy,fontFamily:"'Space Grotesk',sans-serif"}}>{CCY_SYMBOLS[dist.ccy]||dist.ccy}{fmt(p.amount,0)}</td>
-                    <td style={{padding:"10px 10px",color:C.text}}>{p.method}</td>
-                    <td style={{padding:"10px 10px"}}>
-                      <span style={{background:statusBg(p.status),color:statusColour(p.status),fontSize:11,fontWeight:600,padding:"3px 9px",borderRadius:100}}>{p.status}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      <div style={{background:C.navy,borderRadius:12,padding:isMobile?"14px":20,marginBottom:18,display:"flex",flexWrap:"wrap",gap:16,justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:14}}>
+          <div style={{width:48,height:48,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:16,fontWeight:700,flexShrink:0}}>
+            {client.name.split(" ").map(n=>n[0]).join("")}
           </div>
-        );
-      })()}
-
-      {!selectedDist && (
-        <div style={{background:C.silver,borderRadius:8,padding:"14px 18px",fontSize:13,color:C.faint,textAlign:"center"}}>
-          Select a distribution above to view payment details
-        </div>
-      )}
-    </div>
-  );
-};
-
-const ClientDetail=({clientId,onBack,selectedCcy,setPreviewClientId})=>{
-  const isMobile=useIsMobile();
-  const [tab,setTab]=useState("valuation");
-  // Email/Log state
-  const [showEmail,setShowEmail]=useState(false);
-  const [showLog,setShowLog]=useState(false);
-  const [showWD,setShowWD]=useState(false);
-  const [showDocs,setShowDocs]=useState(false);
-  const [emailSubject,setEmailSubject]=useState("");
-  const [emailBody,setEmailBody]=useState("");
-  const [logNote,setLogNote]=useState("");
-  const [logType,setLogType]=useState("call");
-  const [comms,setComms]=useState(COMMS[clientId]||[]);
-  // Withdrawal state
-  const [wdType,setWdType]=useState("PCLS");
-  const [wdAmount,setWdAmount]=useState("");
-  const [wdCcy,setWdCcy]=useState("GBP");
-  const [wdNotes,setWdNotes]=useState("");
-  const [wdSubmitting,setWdSubmitting]=useState(false);
-  const [wdError,setWdError]=useState("");
-  const [wdRequests,setWdRequests]=useState([]);
-  // Risk profile editing
-  const [riskProfiles,setRiskProfiles]=useState(DEFAULT_RISK_PROFILES);
-  const [editingRisk,setEditingRisk]=useState(false);
-  const [editScore,setEditScore]=useState((DEFAULT_RISK_PROFILES[clientId]||{score:5}).score);
-  const [editNotes,setEditNotes]=useState((DEFAULT_RISK_PROFILES[clientId]||{notes:""}).notes||"");
-
-  const sym=CCY_SYMBOLS[selectedCcy]||"$";
-  const client=CLIENTS.find(c=>c.id===clientId);
-  const holdings=HOLDINGS[clientId]||[];
-  const totals=clientTotals(clientId,selectedCcy);
-  const chartData=buildChart(clientId,selectedCcy);
-  const clientTxns=TXNS.filter(t=>t.clientId===clientId);
-  const {result:txSorted,sort:txSort,toggleSort:txToggle,setFilter:txSetFilter,search:txSearch,setSearch:txSetSearch}=useSortFilter(clientTxns,{col:"tradedate",dir:"desc"});
-  const equityH=holdings.filter(h=>!h.isCash);
-  const initials=client.name.split(" ").map(n=>n[0]).join("");
-  const profile=riskProfiles[clientId]||DEFAULT_RISK_PROFILES[clientId];
-  const score=(profile&&profile.score)||5;
-  const comp=computeCompliance(clientId,riskProfiles);
-  const clientDocs=DEFAULT_DOCS[clientId]||[];
-
-  useEffect(()=>{
-    loadRequests().then(all=>setWdRequests(all.filter(r=>r.clientId===clientId)));
-  },[clientId]);
-
-  const sendEmail=()=>{
-    setComms([{id:Date.now(),date:new Date().toISOString().slice(0,10),type:"email",subject:emailSubject,summary:"Sent: "+emailBody.slice(0,80),user:"JW"},...comms]);
-    setShowEmail(false);setEmailSubject("");setEmailBody("");
-  };
-  const logComm=()=>{
-    setComms([{id:Date.now(),date:new Date().toISOString().slice(0,10),type:logType,subject:"Manual log",summary:logNote,user:"JW"},...comms]);
-    setShowLog(false);setLogNote("");
-  };
-  const submitWithdrawal=async()=>{
-    if(!wdAmount||isNaN(parseFloat(wdAmount))){setWdError("Please enter a valid amount.");return;}
-    setWdSubmitting(true);setWdError("");
-    const reqId="WD-"+clientId.slice(-6)+"-"+Date.now().toString().slice(-6);
-    const dateStr=new Date().toISOString().slice(0,10);
-    const newReq={id:reqId,clientId,clientName:client.name,date:dateStr,type:wdType,amount:parseFloat(wdAmount),ccy:wdCcy,notes:wdNotes,status:"Pending"};
-    const row=[reqId,dateStr,clientId,client.name,wdType,parseFloat(wdAmount).toFixed(2),wdCcy,wdNotes||"--","JW","Pending"];
-    await appendToSheet(row);
-    const all=await loadRequests();
-    await saveRequests([newReq,...all]);
-    setWdRequests([newReq,...wdRequests]);
-    setWdSubmitting(false);
-    setShowWD(false);setWdAmount("");setWdNotes("");setWdType("PCLS");setWdCcy("GBP");
-  };
-  const txTypes=[...new Set(clientTxns.map(t=>t.txtype))].sort();
-  const tickers=[...new Set(clientTxns.map(t=>t.ticker))].sort();
-  const typeColour={KYC:"navy","Suitability":"success","Mandate":"info","Risk Disclosure":"warning","Authorisation":"gold"};
-  const typeIcon={KYC:"ID","Suitability":"OK","Mandate":"D","Risk Disclosure":"!","Authorisation":"S"};
-
-  return(
-    <div style={{padding:isMobile?"12px 10px":24}}>
-      <button onClick={onBack} style={{background:"none",border:"none",color:C.teal,fontSize:13,cursor:"pointer",marginBottom:14,padding:0,display:"flex",alignItems:"center",gap:4}}>&larr; All clients</button>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:isMobile?14:20,flexWrap:"wrap",gap:14}}>
-        <div style={{display:"flex",gap:14,alignItems:"center"}}>
-          <div style={{width:50,height:50,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:17,fontWeight:700,flexShrink:0}}>{initials}</div>
           <div>
-            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:21,fontWeight:600,color:C.navy}}>{client.name}</div>
-            <div style={{fontSize:12,color:C.faint,marginTop:2}}>{client.code} . {client.email}</div>
-            <div style={{marginTop:5,display:"flex",gap:5,flexWrap:"wrap"}}><Badge color="success">Verified</Badge><Badge color="navy">{client.jurisdiction}</Badge></div>
+            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{client.name}</div>
+            <div style={{fontSize:12,color:"rgba(255,255,255,0.5)"}}>{client.primaryCode} · {client.reportingCcy} · {client.jurisdiction}</div>
           </div>
         </div>
-        <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-          <Btn onClick={()=>setShowEmail(true)} variant="ghost" small={isMobile}>@ Email</Btn>
-          <Btn onClick={()=>setShowLog(true)} variant="secondary" small={isMobile}>+ Log</Btn>
-          <Btn onClick={()=>setShowWD(true)} variant="dark" small={isMobile}>v Withdrawal</Btn>
-          {setPreviewClientId&&<Btn onClick={()=>setPreviewClientId(clientId)} variant="secondary" small={isMobile}>View Client view</Btn>}
-          <Btn onClick={()=>setShowDocs(true)} variant="secondary" small={isMobile}>D Docs</Btn>
-        </div>
+        {val && (
+          <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Asset Valuation</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.white}}>{sym}{fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),0)}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Cash</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.teal}}>{sym}{fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),0)}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Liabilities</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.red}}>{sym}{fmt(convertAmount(val.totalLiabilities,"USD",selectedCcy),0)}</div>
+            </div>
+          </div>
+        )}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(2,1fr)":"repeat(4,1fr)",gap:isMobile?8:10,marginBottom:isMobile?14:18}}>
-        <div style={{background:C.navy,border:"0.5px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"15px 17px"}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:5}}>Inception value</div>
-          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:21,fontWeight:600,color:C.white,letterSpacing:-0.4}}>{sym}{fmt(totals.totalCost,0)}</div>
-        </div>
-        <div style={{background:C.navy,border:"0.5px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"15px 17px"}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:5}}>Current value</div>
-          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:21,fontWeight:600,color:C.white,letterSpacing:-0.4}}>{sym}{fmt(totals.totalValue,0)}</div>
-        </div>
-        <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"15px 17px"}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:C.faint,marginBottom:5}}>Unrealised P&L</div>
-          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:21,fontWeight:600,color:posColor(totals.pl),letterSpacing:-0.4}}>{sign(totals.pl)}{sym}{fmt(Math.abs(totals.pl),0)}</div>
-          <div style={{fontSize:12,color:posColor(totals.pctReturn),marginTop:3}}>{pct(totals.pctReturn)}</div>
-        </div>
-        <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"15px 17px"}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:C.faint,marginBottom:5}}>Risk profile</div>
-          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:21,fontWeight:600,color:RISK_COLOURS[score]||C.teal,letterSpacing:-0.4}}>{score}{"/10"}</div>
-          <div style={{fontSize:12,color:C.faint,marginTop:3}}>{RISK_LABELS[score]}</div>
-        </div>
-      </div>
-      <div style={{display:"flex",gap:0,borderBottom:"1px solid "+C.silver,marginBottom:18,overflowX:"auto"}}>
-        {[["valuation","Valuation"],["transactions","Transactions"],["distribution","Distribution"],["risk","Risk & Rebalance"],["crm","CRM"]].map(([t,label])=>(
+
+      <div style={{borderBottom:"1.5px solid "+C.silver,marginBottom:20,display:"flex",overflowX:"auto",gap:0}}>
+        {tabs.map(([t,label])=>(
           <button key={t} onClick={()=>setTab(t)} style={{background:"none",border:"none",borderBottom:tab===t?"2px solid "+C.teal:"2px solid transparent",color:tab===t?C.teal:C.faint,fontSize:13,fontWeight:tab===t?600:400,cursor:"pointer",padding:"9px 16px",marginBottom:-1,whiteSpace:"nowrap",fontFamily:"'Inter',sans-serif"}}>
             {label}
           </button>
         ))}
       </div>
-      {tab==="valuation"&&(
+
+      {tab==="valuation" && val && (
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(2,1fr)",gap:12}}>
+          {[
+            {label:"Total Valuation Notice", value:sym+fmt(convertAmount(val.totalValuationNotice,"USD",selectedCcy),2)},
+            {label:"Total Brite Assets", value:sym+fmt(convertAmount(val.totalBriteAssets,"USD",selectedCcy),2)},
+            {label:"Total Asset Valuation", value:sym+fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),2)},
+            {label:"Total Cash Balance", value:sym+fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),2)},
+            {label:"Pension Valuation", value:sym+fmt(convertAmount(val.pensionValuation,"USD",selectedCcy),2)},
+            {label:"Pension Cash Balance", value:sym+fmt(convertAmount(val.pensionCash,"USD",selectedCcy),2)},
+            {label:"Direct Investment Cash", value:sym+fmt(convertAmount(val.directInvestmentCash,"USD",selectedCcy),2)},
+            {label:"Direct Investment Assets", value:sym+fmt(convertAmount(val.directInvestmentAssets,"USD",selectedCcy),2)},
+            {label:"Total Liabilities", value:sym+fmt(convertAmount(val.totalLiabilities,"USD",selectedCcy),2), red:true},
+            {label:"Surrender Rebate Payable", value:sym+fmt(convertAmount(val.surrenderRebatePayable,"USD",selectedCcy),2), red:true},
+          ].map(row=>(
+            <div key={row.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:13,color:C.faint}}>{row.label}</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:600,color:row.red?C.red:C.navy}}>{row.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab==="holdings" && (
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:700}}>
+            <thead>
+              <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+                {["Holding","Account","Shares","Purchase Price","Market Value","Gain / Loss","% Change"].map(h=>(
+                  <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {holdings.map((h,i)=>(
+                <tr key={i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2===0?C.white:"#FAFBFC"}}>
+                  <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>{h.name}</td>
+                  <td style={{padding:"10px 12px",color:C.faint,fontSize:11}}>{h.account}</td>
+                  <td style={{padding:"10px 12px",color:C.text}}>{h.shares.toLocaleString()}</td>
+                  <td style={{padding:"10px 12px",color:C.text}}>{h.purchasePrice}</td>
+                  <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>{h.marketValue}</td>
+                  <td style={{padding:"10px 12px",color:posColor(h.pctChange)}}>{h.gainLoss}</td>
+                  <td style={{padding:"10px 12px"}}>
+                    <span style={{background:posBg(h.pctChange),color:posColor(h.pctChange),fontSize:11,fontWeight:600,padding:"2px 7px",borderRadius:100}}>{pct(h.pctChange)}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {tab==="transactions" && (
         <div>
-          <div style={{background:C.navy,borderRadius:10,padding:"18px 22px",marginBottom:14}}>
-            <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:3}}>Portfolio value . {selectedCcy}</div>
-            <ResponsiveContainer width="100%" height={170}>
-              <AreaChart data={chartData}>
-                <defs><linearGradient id="grad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.teal} stopOpacity={0.3}/><stop offset="95%" stopColor={C.teal} stopOpacity={0}/></linearGradient></defs>
-                <XAxis dataKey="date" tick={{fontSize:10,fill:"rgba(255,255,255,0.35)"}}/>
-                <YAxis tick={{fontSize:9,fill:"rgba(255,255,255,0.35)"}} tickFormatter={v=>sym+Math.round(v*0.001)+"k"}/>
-                <Tooltip formatter={v=>[sym+fmt(v,0),"Value"]} contentStyle={{background:C.navyMid,border:"none",borderRadius:6,fontSize:12}} labelStyle={{color:C.white}}/>
-                <Area type="monotone" dataKey="value" stroke={C.teal} strokeWidth={2} fill="url(#grad)" dot={{fill:C.teal,r:3}}/>
-              </AreaChart>
-            </ResponsiveContainer>
+          <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search transactions..." style={{padding:"7px 12px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",flex:1,minWidth:160,color:C.navy}}/>
+            <select value={txFilter} onChange={e=>setTxFilter(e.target.value)} style={{padding:"7px 12px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",color:C.navy,background:C.white}}>
+              <option value="all">All types</option>
+              <option value="trade">Trades</option>
+              <option value="cashflow">Cashflows</option>
+              <option value="dividend">Dividends</option>
+            </select>
+            <div style={{fontSize:12,color:C.faint}}>{filteredTxns.length} records</div>
           </div>
-          <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,overflow:"hidden"}}>
-            <div style={{padding:"12px 16px",borderBottom:"0.5px solid "+C.silver,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div style={{fontSize:13,fontWeight:600,color:C.navy}}>Holdings</div>
-              <Badge color="info">{holdings.length} positions</Badge>
-            </div>
-            <div style={{overflowX:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                <thead><tr style={{background:C.silver}}>{["Ticker","Description","CCY","Qty","Cost Value","Market Value","P&L","Return"].map(h=><th key={h} style={{padding:"8px 13px",textAlign:"left",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
-                <tbody>
-                  {holdings.map((h,i)=>{
-                    const cv=convertAmount(h.value,h.ccy,selectedCcy);
-                    const cc=convertAmount(h.cost,h.ccy,selectedCcy);
-                    const pl=cv-cc;const ret=calcPct(cc,cv);
-                    return(
-                      <tr key={i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2=== 0 ?C.white:"#FAFBFC"}}>
-                        <td style={{padding:"9px 13px",fontFamily:"Space Grotesk,sans-serif",fontWeight:600,color:C.navy}}>{h.ticker}</td>
-                        <td style={{padding:"9px 13px",color:C.text,maxWidth:150,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.name}</td>
-                        <td style={{padding:"9px 13px"}}><Badge color={h.ccy==="GBP"?"navy":"info"}>{h.ccy}</Badge></td>
-                        <td style={{padding:"9px 13px",textAlign:"right",color:C.text}}>{h.isCash?"--":fmt(h.qty,0)}</td>
-                        <td style={{padding:"9px 13px",textAlign:"right",color:C.text}}>{sym}{fmt(cc)}</td>
-                        <td style={{padding:"9px 13px",textAlign:"right",fontWeight:600,color:C.navy}}>{sym}{fmt(cv)}</td>
-                        <td style={{padding:"9px 13px",textAlign:"right",color:posColor(pl),fontWeight:600}}>{h.isCash?"--":(sign(pl))+sym+fmt(Math.abs(pl))}</td>
-                        <td style={{padding:"9px 13px",textAlign:"right",color:posColor(ret)}}>{h.isCash?"--":pct(ret)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot><tr style={{background:C.navy}}>
-                  <td colSpan={4} style={{padding:"9px 13px",color:C.white,fontWeight:600}}>Total</td>
-                  <td style={{padding:"9px 13px",textAlign:"right",color:"rgba(255,255,255,0.5)"}}>{sym}{fmt(totals.totalCost,0)}</td>
-                  <td style={{padding:"9px 13px",textAlign:"right",color:C.white,fontWeight:700,fontFamily:"Space Grotesk,sans-serif"}}>{sym}{fmt(totals.totalValue,0)}</td>
-                  <td style={{padding:"9px 13px",textAlign:"right",color:totals.pl>= 0 ?"#34D399":"#F87171",fontWeight:600}}>{sign(totals.pl)}{sym}{fmt(Math.abs(totals.pl),0)}</td>
-                  <td style={{padding:"9px 13px",textAlign:"right",color:totals.pctReturn>= 0 ?"#34D399":"#F87171",fontWeight:600}}>{pct(totals.pctReturn)}</td>
-                </tr></tfoot>
-              </table>
-            </div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:800}}>
+              <thead>
+                <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+                  {["Date","Type","Ticker","Description","Account","CCY","Consideration","Net Amount"].map(h=>(
+                    <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredTxns.map(t=>(
+                  <tr key={t.id} style={{borderBottom:"0.5px solid "+C.silver}}>
+                    <td style={{padding:"8px 12px",color:C.faint,whiteSpace:"nowrap"}}>{t.tradedate}</td>
+                    <td style={{padding:"8px 12px"}}><Badge color={t.txtype==="BUY"?"success":t.txtype==="SELL"?"error":t.txtype==="Dividend"?"navy":"info"}>{t.txtype}</Badge></td>
+                    <td style={{padding:"8px 12px",fontWeight:600,color:C.navy}}>{t.ticker}</td>
+                    <td style={{padding:"8px 12px",color:C.text,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
+                    <td style={{padding:"8px 12px",color:C.faint,fontSize:11}}>{t.accountId}</td>
+                    <td style={{padding:"8px 12px",color:C.faint}}>{t.ccy}</td>
+                    <td style={{padding:"8px 12px",color:C.navy,fontFamily:"monospace"}}>{t.consideration.toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                    <td style={{padding:"8px 12px",color:posColor(t.clientnetamt),fontFamily:"monospace"}}>{t.clientnetamt >= 0 ? "+" : ""}{t.clientnetamt.toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-          {wdRequests.length>0&&(
-            <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,overflow:"hidden",marginTop:14}}>
-              <div style={{padding:"12px 16px",borderBottom:"0.5px solid "+C.silver,display:"flex",justifyContent:"space-between",alignItems:"center",background:"#FAFBFC"}}>
-                <div style={{fontSize:13,fontWeight:600,color:C.navy}}>Withdrawal requests</div>
-                <Badge color={wdRequests.filter(r=>r.status==="Pending").length> 0 ?"warning":"success"}>{wdRequests.filter(r=>r.status==="Pending").length} pending</Badge>
+        </div>
+      )}
+
+      {tab==="withdrawals" && (
+        <div>
+          <div style={{marginBottom:16,fontSize:13,color:C.faint}}>Processed withdrawal payments for this client.</div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead>
+              <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+                {["Date Requested","Type","Currency","Requested Amount","Actual Paid","Payment Date"].map(h=>(
+                  <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {withdrawals.length === 0 ? (
+                <tr><td colSpan={6} style={{padding:24,textAlign:"center",color:C.faint}}>No withdrawals recorded</td></tr>
+              ) : withdrawals.map((w,i)=>(
+                <tr key={i} style={{borderBottom:"0.5px solid "+C.silver}}>
+                  <td style={{padding:"10px 12px",color:C.text}}>{w.dateRequested}</td>
+                  <td style={{padding:"10px 12px"}}><Badge color="info">{w.type}</Badge></td>
+                  <td style={{padding:"10px 12px",color:C.faint}}>{w.currency}</td>
+                  <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>${fmt(w.requestedAmount,2)}</td>
+                  <td style={{padding:"10px 12px",fontWeight:600,color:C.green}}>${fmt(w.actualPaid,2)}</td>
+                  <td style={{padding:"10px 12px",color:C.text}}>{w.paymentDate}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{marginTop:16,background:C.silver,borderRadius:8,padding:"12px 16px",display:"flex",justifyContent:"space-between"}}>
+            <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Total paid</span>
+            <span style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>${fmt(withdrawals.reduce((s,w)=>s+w.actualPaid,0),2)}</span>
+          </div>
+        </div>
+      )}
+
+      {tab==="distribution" && (
+        <div>
+          {distributions.length === 0 ? (
+            <div style={{padding:32,textAlign:"center",color:C.faint}}>
+              <div style={{fontSize:32,marginBottom:12}}>◇</div>
+              <div style={{fontSize:14,fontWeight:600,color:C.navy,marginBottom:6}}>No distributions</div>
+            </div>
+          ) : distributions.map((dist,di)=>(
+            <div key={di} style={{marginBottom:24}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+                <div>
+                  <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>{dist.name}</div>
+                  <div style={{fontSize:12,color:C.faint}}>Date: {dist.date} · {dist.payments.length} payment{dist.payments.length!==1?"s":""}</div>
+                </div>
+                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.navy}}>
+                  ${fmt(dist.payments.reduce((s,p)=>s+p.amount,0),2)}
+                </div>
               </div>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                <thead><tr style={{background:C.silver}}>{["ID","Date","Type","Amount","CCY","Status"].map(h=><th key={h} style={{padding:"7px 13px",textAlign:"left",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                <thead>
+                  <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+                    {["Account","Recipient","Date","Amount"].map(h=>(
+                      <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase"}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
                 <tbody>
-                  {wdRequests.map((r,i)=>(
-                    <tr key={r.id} style={{borderBottom:"0.5px solid "+C.silver,background:i%2=== 0 ?C.white:"#FAFBFC"}}>
-                      <td style={{padding:"8px 13px",fontFamily:"monospace",fontSize:10,color:C.faint}}>{r.id}</td>
-                      <td style={{padding:"8px 13px",color:C.text}}>{r.date}</td>
-                      <td style={{padding:"8px 13px",fontWeight:600,color:C.navy}}>{r.type}</td>
-                      <td style={{padding:"8px 13px",fontFamily:"Space Grotesk,sans-serif",fontWeight:600,color:C.navy,textAlign:"right"}}>{r.ccy==="GBP"?"GBP":"$"}{fmt(r.amount)}</td>
-                      <td style={{padding:"8px 13px"}}><Badge color={r.ccy==="GBP"?"navy":"info"}>{r.ccy}</Badge></td>
-                      <td style={{padding:"8px 13px"}}><Badge color={r.status==="Actioned"?"success":"warning"}>{r.status==="Actioned"?"Actioned":"Pending"}</Badge></td>
+                  {dist.payments.map((p,i)=>(
+                    <tr key={i} style={{borderBottom:"0.5px solid "+C.silver}}>
+                      <td style={{padding:"10px 12px",fontFamily:"monospace",fontSize:12,color:C.faint}}>{p.accountNumber}</td>
+                      <td style={{padding:"10px 12px",color:C.text}}>{p.recipient}</td>
+                      <td style={{padding:"10px 12px",color:C.text}}>{p.date}</td>
+                      <td style={{padding:"10px 12px",fontWeight:600,color:C.navy,fontFamily:"Space Grotesk,sans-serif"}}>${fmt(p.amount,2)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          )}
-        </div>
-      )}
-      {tab==="transactions"&&(
-        <div>
-          <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-            <input value={txSearch} onChange={e=>txSetSearch(e.target.value)} placeholder="Search transactions..." style={{flex:1,minWidth:150,padding:"7px 11px",border:"1.5px solid "+C.silver,borderRadius:6,fontSize:12,fontFamily:"'Inter',sans-serif",outline:"none"}}/>
-            <select onChange={e=>txSetFilter("txtype",e.target.value)} style={{padding:"7px 10px",border:"1.5px solid "+C.silver,borderRadius:6,fontSize:12,fontFamily:"'Inter',sans-serif",color:C.navy,background:C.white}}>
-              <option value="all">All types</option>
-              {txTypes.map(t=><option key={t} value={t}>{t}</option>)}
-            </select>
-            <select onChange={e=>txSetFilter("ticker",e.target.value)} style={{padding:"7px 10px",border:"1.5px solid "+C.silver,borderRadius:6,fontSize:12,fontFamily:"'Inter',sans-serif",color:C.navy,background:C.white}}>
-              <option value="all">All tickers</option>
-              {tickers.map(t=><option key={t} value={t}>{t}</option>)}
-            </select>
-            <span style={{fontSize:12,color:C.faint,display:"flex",alignItems:"center"}}>{txSorted.length} rows</span>
-          </div>
-          <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,overflow:"hidden"}}>
-            <div style={{overflowX:"auto",maxHeight:480,overflowY:"auto"}}>
-              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-                <thead style={{position:"sticky",top:0,zIndex:5}}>
-                  <tr style={{background:C.navy}}>
-                    {[["tradedate","Date"],["txtype","Type"],["ticker","Ticker"],["description","Description"],["ccy","CCY"],["qty","Qty"],["consideration","Amount"],["netamt","Net"]].map(([col,label])=>(
-                      <th key={col} onClick={()=>txToggle(col)} style={{padding:"8px 11px",textAlign:"left",fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.6)",letterSpacing:0.8,textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",userSelect:"none",background:C.navy}}>
-                        {label}<SortIcon dir={txSort.col===col?txSort.dir:null}/>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {txSorted.slice(0,300).map((t,i)=>{
-                    const tc=t.txtype==="BUY"?"success":t.txtype==="SELL"?"error":t.txtype==="Dividend"?"gold":t.txtype.includes("Fee")||t.txtype==="SR Fee"?"warning":"info";
-                    return(
-                      <tr key={i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2=== 0 ?C.white:"#FAFBFC"}}>
-                        <td style={{padding:"6px 11px",color:C.text,whiteSpace:"nowrap"}}>{t.tradedate}</td>
-                        <td style={{padding:"6px 11px"}}><Badge color={tc}>{t.txtype}</Badge></td>
-                        <td style={{padding:"6px 11px",fontFamily:"Space Grotesk,sans-serif",fontWeight:600,color:C.navy}}>{t.ticker}</td>
-                        <td style={{padding:"6px 11px",color:C.text,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
-                        <td style={{padding:"6px 11px"}}><Badge color={t.ccy==="GBP"?"navy":"info"}>{t.ccy}</Badge></td>
-                        <td style={{padding:"6px 11px",textAlign:"right",color:C.text}}>{t.qty!== 0 ?fmt(Math.abs(t.qty),0):"--"}</td>
-                        <td style={{padding:"6px 11px",textAlign:"right",fontWeight:600,color:C.navy}}>{fmt(t.consideration)}</td>
-                        <td style={{padding:"6px 11px",textAlign:"right",color:posColor(t.netamt)}}>{fmt(t.netamt)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {txSorted.length>300&&<div style={{padding:"8px 14px",fontSize:11,color:C.faint,borderTop:"0.5px solid "+C.silver}}>Showing 300 of {txSorted.length} rows -- use filters to narrow</div>}
-          </div>
-        </div>
-      )}
-      {tab==="risk"&&(
-        <div>
-          <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14,marginBottom:14}}>
-            <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:18}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-                <div style={{fontSize:11,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase"}}>Risk profile</div>
-                <Btn small variant="ghost" onClick={()=>setEditingRisk(true)}>Edit</Btn>
-              </div>
-              <div style={{display:"flex",gap:14,alignItems:"center",marginBottom:14}}>
-                <div style={{width:52,height:52,borderRadius:"50%",background:RISK_COLOURS[score]||C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,flexShrink:0}}>{score}</div>
-                <div>
-                  <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:600,color:C.navy}}>{RISK_LABELS[score]}</div>
-                  <div style={{fontSize:11,color:C.faint,marginTop:2}}>Equity {RISK_MANDATES[score].equity[0]}-{RISK_MANDATES[score].equity[1]}% . FI {RISK_MANDATES[score].fi[0]}-{RISK_MANDATES[score].fi[1]}%</div>
-                  <div style={{fontSize:11,color:C.faint}}>Reviewed: {(profile&&profile.reviewed)||"Never"}</div>
-                </div>
-              </div>
-              <div style={{fontSize:12,color:C.text,lineHeight:1.6,fontStyle:"italic"}}>{(profile&&profile.notes)||"No suitability notes."}</div>
-              <div style={{marginTop:14,paddingTop:14,borderTop:"0.5px solid "+C.silver}}>
-                <div style={{fontSize:11,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Compliance flags</div>
-                {comp&&comp.flags&&comp.flags.length===0&&<div style={{color:C.green,fontSize:13,fontWeight:500}}>OK No breaches detected</div>}
-                {comp&&comp.flags&&comp.flags.length>0&&comp.flags.map((f,fi)=>(
-                  <div key={fi} style={{display:"flex",gap:8,marginBottom:6,padding:"7px 10px",background:f.type==="error"?C.redBg:C.amberBg,borderRadius:6}}>
-                    <span>{f.type==="error"?"●":"●"}</span>
-                    <span style={{fontSize:12,color:C.text,lineHeight:1.5}}>{f.msg}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:18}}>
-              <div style={{fontSize:11,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",marginBottom:14}}>Current vs mandate</div>
-              {comp&&["Equity","Fixed Income","Cash","Commodity"].map(ac=>{
-                const val=ac==="Equity"?comp.eqPct:ac==="Fixed Income"?comp.fiPct:ac==="Cash"?comp.cashPct:comp.comPct;
-                const range=RISK_MANDATES[score][ac==="Equity"?"equity":ac==="Fixed Income"?"fi":ac==="Cash"?"cash":"commodity"];
-                const breach=val<range[0]||val>range[1];
-                return(
-                  <div key={ac} style={{marginBottom:12}}>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:3}}>
-                      <span style={{fontWeight:breach?600:400,color:breach?C.red:C.navy}}>{ac}</span>
-                      <span style={{color:breach?C.red:C.faint}}>{val}% <span style={{color:C.faint,fontSize:11}}>(mandate {range[0]}-{range[1]}%)</span></span>
-                    </div>
-                    <div style={{height:6,background:C.silver,borderRadius:3,position:"relative"}}>
-                      <div style={{height:"100%",width:Math.min(val,100)+"%",background:breach?C.red:RISK_COLOURS[score]||C.teal,borderRadius:3}}/>
-                      <div style={{position:"absolute",top:0,height:"100%",width:2,left:range[1]+"%",background:"rgba(0,0,0,0.15)",borderRadius:1}}/>
-                    </div>
-                  </div>
-                );
-              })}
-              {comp&&(()=>{
-                const total=holdings.reduce((s,h)=>s+convertAmount(h.value,h.ccy,selectedCcy),0);
-                const trades=["Equity","Fixed Income","Cash","Commodity"].map(ac=>{
-                  const cur=(comp.byClass[ac]||0);
-                  const m=RISK_MANDATES[score][ac==="Equity"?"equity":ac==="Fixed Income"?"fi":ac==="Cash"?"cash":"commodity"];
-                  const tgt=total*(m[0]+m[1])*0.005;
-                  return {ac,diff:tgt-cur};
-                }).filter(t=>Math.abs(t.diff)>500);
-                if(trades.length===0) return <div style={{marginTop:14,color:C.green,fontSize:13,fontWeight:500}}>OK Portfolio within mandate -- no rebalance needed</div>;
-                return(
-                  <div style={{marginTop:14,paddingTop:14,borderTop:"0.5px solid "+C.silver}}>
-                    <div style={{fontSize:11,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Suggested trades</div>
-                    {trades.map((t,i)=>(
-                      <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:t.diff>= 0 ?C.greenBg:C.redBg,borderRadius:6,marginBottom:6}}>
-                        <span style={{fontSize:12,fontWeight:600,color:C.navy}}>{t.ac}</span>
-                        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                          <Badge color={t.diff>= 0 ?"success":"error"}>{t.diff>= 0 ?"BUY":"SELL"}</Badge>
-                          <span style={{fontFamily:"Space Grotesk,sans-serif",fontWeight:700,fontSize:13,color:t.diff>= 0 ?C.green:C.red}}>{sym}{fmt(Math.abs(t.diff),0)}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-        </div>
-      )}
-      {tab==="distribution"&&(
-        <DistributionTab clientId={clientId} selectedCcy={selectedCcy} sym={sym}/>
-      )}
-      {tab==="crm"&&(
-        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 2fr",gap:14}}>
-          <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:18}}>
-            <div style={{fontSize:11,fontWeight:600,color:C.faint,letterSpacing:2,textTransform:"uppercase",marginBottom:12}}>Client profile</div>
-            {[["Full name",client.name],["Email",client.email],["Phone",client.phone||"--"],["Address",client.address],["Jurisdiction",client.jurisdiction],["Client since",client.joined],["Status","Verified"]].map(([l,v])=>(
-              <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:"0.5px solid "+C.silver}}>
-                <span style={{fontSize:12,color:C.faint}}>{l}</span>
-                <span style={{fontSize:12,fontWeight:500,color:C.navy}}>{v}</span>
-              </div>
-            ))}
-          </div>
-          <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,overflow:"hidden"}}>
-            <div style={{padding:"12px 16px",borderBottom:"0.5px solid "+C.silver,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <div style={{fontSize:13,fontWeight:600,color:C.navy}}>Communication log</div>
-              <div style={{display:"flex",gap:6}}>
-                <Btn small onClick={()=>setShowEmail(true)} variant="ghost">@ Email</Btn>
-                <Btn small onClick={()=>setShowLog(true)} variant="secondary">+ Log</Btn>
-              </div>
-            </div>
-            <div style={{padding:"0 16px"}}>
-              {comms.map((c,i)=>(
-                <div key={i} style={{padding:"12px 0",borderBottom:"0.5px solid "+C.silver}}>
-                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:5}}>
-                    <div style={{display:"flex",gap:7,alignItems:"center"}}>
-                      <Badge color={c.type==="email"?"info":c.type==="call"?"success":c.type==="meeting"?"gold":"navy"}>{c.type}</Badge>
-                      <span style={{fontSize:13,fontWeight:600,color:C.navy}}>{c.subject}</span>
-                    </div>
-                    <span style={{fontSize:11,color:C.faint,whiteSpace:"nowrap"}}>{c.date}</span>
-                  </div>
-                  <div style={{fontSize:12,color:C.text,lineHeight:1.6}}>{c.summary}</div>
-                  <div style={{fontSize:11,color:C.faint,marginTop:3}}>Logged by {c.user}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-      {showEmail&&<Modal title={"Email "+client.name} onClose={()=>setShowEmail(false)}>
-        <div style={{fontSize:12,color:C.faint,marginBottom:14}}>To: {client.email}</div>
-        <FldInput label="Subject" value={emailSubject} onChange={setEmailSubject} placeholder="e.g. Q2 Portfolio Review"/>
-        <div style={{marginBottom:13}}><label style={{fontSize:11,fontWeight:600,color:C.text,display:"block",marginBottom:4}}>Message</label><textarea value={emailBody} onChange={e=>setEmailBody(e.target.value)} rows={5} style={{width:"100%",padding:"8px 11px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",resize:"vertical",boxSizing:"border-box"}}/></div>
-        <div style={{display:"flex",gap:7,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>setShowEmail(false)}>Cancel</Btn><Btn onClick={sendEmail}>Send</Btn></div>
-      </Modal>}
-
-      {showLog&&<Modal title="Log communication" onClose={()=>setShowLog(false)}>
-        <FldSelect label="Type" value={logType} onChange={setLogType} options={[{value:"call",label:"Phone call"},{value:"email",label:"Email"},{value:"meeting",label:"Meeting"},{value:"note",label:"Internal note"}]}/>
-        <div style={{marginBottom:13}}><label style={{fontSize:11,fontWeight:600,color:C.text,display:"block",marginBottom:4}}>Notes</label><textarea value={logNote} onChange={e=>setLogNote(e.target.value)} rows={4} style={{width:"100%",padding:"8px 11px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",resize:"vertical",boxSizing:"border-box"}}/></div>
-        <div style={{display:"flex",gap:7,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>setShowLog(false)}>Cancel</Btn><Btn onClick={logComm}>Save</Btn></div>
-      </Modal>}
-
-      {showWD&&<Modal title="Withdrawal request" onClose={()=>{setShowWD(false);setWdError("");}}>
-        <div style={{background:C.navy,borderRadius:8,padding:"12px 16px",marginBottom:16,display:"flex",gap:12,alignItems:"center"}}>
-          <div style={{width:36,height:36,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:14,fontWeight:700}}>{initials}</div>
-          <div><div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.white}}>{client.name}</div><div style={{fontSize:11,color:"rgba(255,255,255,0.45)"}}>{client.id}</div></div>
-        </div>
-        <FldSelect label="Withdrawal type" value={wdType} onChange={setWdType} options={[
-          {value:"PCLS",label:"PCLS -- Pension Commencement Lump Sum"},
-          {value:"Regular Withdrawal",label:"Regular withdrawal"},
-          {value:"Drawdown",label:"Drawdown"},
-          {value:"Flexi-Access Drawdown",label:"Flexi-access drawdown"},
-          {value:"UFPLS",label:"UFPLS -- Uncrystallised Fund Pension Lump Sum"},
-          {value:"Full Surrender",label:"Full surrender"},
-          {value:"Partial Surrender",label:"Partial surrender"},
-          {value:"Ad Hoc",label:"Ad hoc withdrawal"},
-        ]}/>
-        <div style={{display:"grid",gridTemplateColumns:"2fr 1fr",gap:12}}>
-          <FldInput label="Amount" value={wdAmount} onChange={setWdAmount} placeholder="5000.00" type="number"/>
-          <FldSelect label="CCY" value={wdCcy} onChange={setWdCcy} options={[{value:"GBP",label:"GBP GBP"},{value:"USD",label:"USD $"},{value:"EUR",label:"EUR EUR"},{value:"CNY",label:"CNY CNY"}]}/>
-        </div>
-        <div style={{marginBottom:14}}><label style={{fontSize:11,fontWeight:600,color:C.text,display:"block",marginBottom:4}}>Notes (optional)</label><textarea value={wdNotes} onChange={e=>setWdNotes(e.target.value)} rows={3} placeholder="e.g. Transfer to Barclays account ending 4821" style={{width:"100%",padding:"8px 11px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",resize:"vertical",boxSizing:"border-box"}}/></div>
-        <div style={{background:C.silver,borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:12,color:C.text,lineHeight:1.7}}>Request will be logged with status <strong>Pending</strong> and written to the Google Sheets back-office log.</div>
-        {wdError&&<div style={{background:C.amberBg,border:"1px solid "+C.gold,borderRadius:6,padding:"10px 12px",fontSize:12,color:C.amber,marginBottom:12}}>{wdError}</div>}
-        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>{setShowWD(false);setWdError("");}}>Cancel</Btn><Btn onClick={submitWithdrawal} variant="dark">{wdSubmitting?"Submitting...":"Submit request"}</Btn></div>
-      </Modal>}
-
-      {showDocs&&<Modal title={"Documents -- "+client.name} onClose={()=>setShowDocs(false)}>
-        <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16}}>
-          {clientDocs.map(doc=>(
-            <div key={doc.id} style={{display:"flex",gap:12,alignItems:"center",padding:"10px 14px",background:C.silver,borderRadius:8}}>
-              <span style={{fontSize:22,flexShrink:0}}>{typeIcon[doc.type]||"Doc"}</span>
-              <div style={{flex:1}}>
-                <div style={{fontSize:13,fontWeight:600,color:C.navy}}>{doc.name}</div>
-                <div style={{display:"flex",gap:6,marginTop:4}}><Badge color={typeColour[doc.type]||"info"}>{doc.type}</Badge></div>
-                <div style={{fontSize:11,color:C.faint,marginTop:3}}>{doc.date} . {doc.size} . {doc.uploader}</div>
-              </div>
-              <Btn small variant="ghost">View</Btn>
-            </div>
           ))}
-          {clientDocs.length===0&&<div style={{textAlign:"center",padding:20,color:C.faint,fontSize:13}}>No documents uploaded yet.</div>}
         </div>
-        <div style={{borderTop:"0.5px solid "+C.silver,paddingTop:14,display:"flex",justifyContent:"flex-end",gap:8}}>
-          <Btn variant="secondary" onClick={()=>setShowDocs(false)}>Close</Btn>
-          <Btn variant="primary">+ Upload document</Btn>
-        </div>
-      </Modal>}
+      )}
 
-      {editingRisk&&<Modal title="Edit risk profile" onClose={()=>setEditingRisk(false)}>
-        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.navy,marginBottom:14}}>{client.name}</div>
-        <div style={{marginBottom:14}}>
-          <label style={{fontSize:11,fontWeight:600,color:C.text,display:"block",marginBottom:6}}>Risk score: <strong>{editScore} -- {RISK_LABELS[editScore]}</strong></label>
-          <input type="range" min={1} max={10} value={editScore} onChange={e=>setEditScore(+e.target.value)} style={{width:"100%"}}/>
-          <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:C.faint,marginTop:4}}><span>1 Very Cautious</span><span>5 Moderate</span><span>10 Speculative</span></div>
-        </div>
-        <div style={{background:C.silver,borderRadius:8,padding:"10px 14px",fontSize:12,color:C.text,marginBottom:14}}>
-          Mandate: Equity {RISK_MANDATES[editScore].equity[0]}-{RISK_MANDATES[editScore].equity[1]}% . Fixed Income {RISK_MANDATES[editScore].fi[0]}-{RISK_MANDATES[editScore].fi[1]}% . Cash max {RISK_MANDATES[editScore].cash[1]}%
-        </div>
-        <div style={{marginBottom:14}}><label style={{fontSize:11,fontWeight:600,color:C.text,display:"block",marginBottom:4}}>Suitability notes</label><textarea value={editNotes} onChange={e=>setEditNotes(e.target.value)} rows={4} style={{width:"100%",padding:"8px 11px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",resize:"vertical",boxSizing:"border-box"}}/></div>
-        <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-          <Btn variant="secondary" onClick={()=>setEditingRisk(false)}>Cancel</Btn>
-          <Btn onClick={()=>{setRiskProfiles({...riskProfiles,[clientId]:{...profile,score:editScore,notes:editNotes,reviewed:new Date().toISOString().slice(0,10)}});setEditingRisk(false);}}>Save</Btn>
-        </div>
-      </Modal>}
-    </div>
-  );
-};
-
-
-const ClientsList=({selectedClient,setSelectedClient,selectedCcy,setPreviewClientId})=>{
-  const [search,setSearch]=useState("");
-  const [showAdd,setShowAdd]=useState(false);
-  const [clients,setClients]=useState(CLIENTS);
-  const [newC,setNewC]=useState({name:"",email:"",address:"",jurisdiction:"US"});
-  const sym=CCY_SYMBOLS[selectedCcy]||"$";
-  if(selectedClient) return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy} setPreviewClientId={setPreviewClientId}/>;
-  const filtered=clients.filter(c=>c.name.toLowerCase().includes(search.toLowerCase())||c.email.toLowerCase().includes(search.toLowerCase())||c.id.includes(search));
-  const addClient=()=>{const id="C00"+Date.now().toString().slice(-6);setClients([...clients,{...newC,id,code:(id.slice(1)+"-"+(newC.name.split(" ")[1]||"New")),verified:false,phone:"",joined:new Date().toISOString().slice(0,10)}]);setShowAdd(false);setNewC({name:"",email:"",address:"",jurisdiction:"US"});};
-  return(
-    <div style={{padding:24}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-        <div><div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:3}}>CRM</div><div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:600,color:C.navy}}>Clients</div></div>
-        <div style={{display:"flex",gap:7}}><Btn variant="secondary">^ Upload CSV</Btn><Btn onClick={()=>setShowAdd(true)}>+ Add client</Btn></div>
-      </div>
-      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name, email or ID..." style={{width:"100%",padding:"9px 13px",border:"1.5px solid "+C.silver,borderRadius:7,fontSize:13,fontFamily:"'Inter',sans-serif",marginBottom:14,boxSizing:"border-box",outline:"none"}}/>
-      <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,overflow:"hidden"}}>
-        <table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead><tr style={{background:C.silver}}>{["Client","ID","Email","Jurisdiction","Verified","Portfolio","P&L",""].map(h=><th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
-          <tbody>
-            {filtered.map((c,i)=>{const t=clientTotals(c.id,selectedCcy);return(
-              <tr key={c.id} style={{borderBottom:"0.5px solid "+C.silver,background:i%2=== 0 ?C.white:"#FAFBFC",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background=C.tealLight} onMouseLeave={e=>e.currentTarget.style.background=i%2=== 0 ?C.white:"#FAFBFC"}>
-                <td style={{padding:"11px 14px"}}><div style={{display:"flex",gap:9,alignItems:"center"}}><div style={{width:33,height:33,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:12,fontWeight:700,flexShrink:0}}>{c.name.split(" ").map(n=>n[0]).join("")}</div><div><div style={{fontSize:13,fontWeight:600,color:C.navy}}>{c.name}</div><div style={{fontSize:11,color:C.faint}}>{c.address}</div></div></div></td>
-                <td style={{padding:"11px 14px",fontFamily:"monospace",fontSize:11,color:C.faint}}>{c.id}</td>
-                <td style={{padding:"11px 14px",fontSize:12,color:C.text}}>{c.email}</td>
-                <td style={{padding:"11px 14px"}}><Badge color="navy">{c.jurisdiction}</Badge></td>
-                <td style={{padding:"11px 14px"}}><Badge color={c.verified?"success":"warning"}>{c.verified?"Yes":"No"}</Badge></td>
-                <td style={{padding:"11px 14px",fontFamily:"Space Grotesk,sans-serif",fontWeight:600,color:C.navy}}>{sym}{fmt(t.totalValue,0)}</td>
-                <td style={{padding:"11px 14px",fontWeight:600,color:posColor(t.pl)}}>{sign(t.pl)}{sym}{fmt(Math.abs(t.pl),0)}</td>
-                <td style={{padding:"11px 14px"}}><Btn small variant="ghost" onClick={()=>setSelectedClient(c.id)}>View &gt;</Btn></td>
-              </tr>
-            );})}
-          </tbody>
-        </table>
-      </div>
-      {showAdd&&<Modal title="Add client" onClose={()=>setShowAdd(false)}><FldInput label="Full name" value={newC.name} onChange={v=>setNewC({...newC,name:v})} placeholder="Jane Smith"/><FldInput label="Email" value={newC.email} onChange={v=>setNewC({...newC,email:v})} placeholder="jane@example.com"/><FldInput label="Address" value={newC.address} onChange={v=>setNewC({...newC,address:v})} placeholder="1 Main Street"/><FldSelect label="Jurisdiction" value={newC.jurisdiction} onChange={v=>setNewC({...newC,jurisdiction:v})} options={[{value:"US",label:"United States"},{value:"UK",label:"United Kingdom"},{value:"EU",label:"European Union"},{value:"Other",label:"Other"}]}/><div style={{display:"flex",gap:7,justifyContent:"flex-end",marginTop:6}}><Btn variant="secondary" onClick={()=>setShowAdd(false)}>Cancel</Btn><Btn onClick={addClient}>Add client</Btn></div></Modal>}
-    </div>
-  );
-};
-
-// --- TRANSACTIONS (ALL 1283) ---------------------------------------
-const Transactions=({selectedCcy})=>{
-  const sym=CCY_SYMBOLS[selectedCcy]||"$";
-  const [showAdd,setShowAdd]=useState(false);
-  const [extraTxns,setExtraTxns]=useState([]);
-  const [newTxn,setNewTxn]=useState({clientId:"",txtype:"BUY",ticker:"",description:"",ccy:"USD",qty:"",consideration:"",netamt:""});
-  const allTxns=[...TXNS,...extraTxns];
-  const {result,sort,toggleSort,filters,setFilter,search,setSearch}=useSortFilter(allTxns,{col:"tradedate",dir:"desc"});
-
-  const txTypes=[...new Set(allTxns.map(t=>t.txtype))].sort();
-  const clientNames=[...new Set(allTxns.map(t=>t.clientId))];
-  const selectors=["Trade","Cashflow","Dividend","CorpAct"];
-
-  const addTxn=()=>{
-    const client=CLIENTS.find(c=>c.id===newTxn.clientId);
-    setExtraTxns([{...newTxn,id:Date.now(),selector:"Cashflow",tradedate:new Date().toISOString().slice(0,10),settdate:new Date().toISOString().slice(0,10),clientName:(client&&client.name)||"",qty:parseFloat(newTxn.qty)||0,consideration:parseFloat(newTxn.consideration)||0,netamt:parseFloat(newTxn.netamt)||0,costprice:0,costvalue:0},...extraTxns]);
-    setShowAdd(false);setNewTxn({clientId:"",txtype:"BUY",ticker:"",description:"",ccy:"USD",qty:"",consideration:"",netamt:""});
-  };
-
-  return(
-    <div style={{padding:24}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-        <div>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:3}}>Data</div>
-          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:600,color:C.navy}}>All transactions</div>
-          <div style={{fontSize:12,color:C.faint,marginTop:2}}>{allTxns.length.toLocaleString()} records . Trades, Dividends, Cashflows, FX, Fees, Deposits, Withdrawals</div>
-        </div>
-        <div style={{display:"flex",gap:7}}><Btn variant="secondary">^ Upload CSV</Btn><Btn onClick={()=>setShowAdd(true)}>+ Add transaction</Btn></div>
-      </div>
-
-      <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,overflow:"hidden"}}>
-        <div style={{padding:"12px 16px",borderBottom:"0.5px solid "+C.silver,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",background:"#FAFBFC"}}>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search Search descriptions, tickers, refs..." style={{flex:1,minWidth:200,padding:"6px 10px",border:"1.5px solid "+C.silver,borderRadius:6,fontSize:12,fontFamily:"'Inter',sans-serif",outline:"none"}}/>
-          <select onChange={e=>setFilter("clientId",e.target.value)} style={{padding:"6px 9px",border:"1.5px solid "+C.silver,borderRadius:6,fontSize:12,fontFamily:"'Inter',sans-serif",outline:"none",color:C.navy,background:C.white}}>
-            <option value="all">All clients</option>
-            {CLIENTS.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <select onChange={e=>setFilter("selector",e.target.value)} style={{padding:"6px 9px",border:"1.5px solid "+C.silver,borderRadius:6,fontSize:12,fontFamily:"'Inter',sans-serif",outline:"none",color:C.navy,background:C.white}}>
-            <option value="all">All categories</option>
-            {selectors.map(s=><option key={s} value={s}>{s}</option>)}
-          </select>
-          <select onChange={e=>setFilter("txtype",e.target.value)} style={{padding:"6px 9px",border:"1.5px solid "+C.silver,borderRadius:6,fontSize:12,fontFamily:"'Inter',sans-serif",outline:"none",color:C.navy,background:C.white}}>
-            <option value="all">All types</option>
-            {txTypes.map(t=><option key={t} value={t}>{t}</option>)}
-          </select>
-          <select onChange={e=>setFilter("ccy",e.target.value)} style={{padding:"6px 9px",border:"1.5px solid "+C.silver,borderRadius:6,fontSize:12,fontFamily:"'Inter',sans-serif",outline:"none",color:C.navy,background:C.white}}>
-            <option value="all">All CCY</option>
-            <option value="GBP">GBP</option><option value="USD">USD</option>
-          </select>
-          <span style={{fontSize:12,color:C.faint,whiteSpace:"nowrap"}}>{result.length.toLocaleString()} of {allTxns.length.toLocaleString()}</span>
-        </div>
-
-        <div style={{overflowX:"auto",maxHeight:600,overflowY:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
-            <thead style={{position:"sticky",top:0,zIndex:5}}>
-              <tr style={{background:C.navy}}>
-                {[["tradedate","Trade Date"],["settdate","Sett Date"],["clientId","Client"],["selector","Category"],["txtype","Type"],["ticker","Ticker"],["description","Description"],["ccy","CCY"],["qty","Qty"],["consideration","Consideration"],["netamt","Net Amt"],["costprice","Cost Price"],["costvalue","Cost Value"]].map(([col,label])=>(
-                  <th key={col} onClick={()=>toggleSort(col)} style={{padding:"8px 10px",textAlign:"left",fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.6)",letterSpacing:0.8,textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",userSelect:"none",position:"sticky",top:0,background:C.navy}}>
-                    {label}<SortIcon dir={sort.col===col?sort.dir:null}/>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {result.slice(0,600).map((t,i)=>{
-                const typeColor=t.txtype==="BUY"?"success":t.txtype==="SELL"?"error":t.txtype==="Dividend"?"gold":t.txtype.includes("Fee")||t.txtype==="SR Fee"?"warning":t.txtype==="Deposit"?"up":t.txtype==="Withdrawal"?"down":t.txtype.includes("FX")?"navy":"info";
-                const clientName=(CLIENTS.find(c=>c.id===t.clientId)||{name:t.clientId}).name.split(" ")[0];
-                return(
-                  <tr key={t.id||i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2=== 0 ?C.white:"#FAFBFC"}}>
-                    <td style={{padding:"6px 10px",color:C.text,whiteSpace:"nowrap"}}>{t.tradedate}</td>
-                    <td style={{padding:"6px 10px",color:C.faint,whiteSpace:"nowrap"}}>{t.settdate}</td>
-                    <td style={{padding:"6px 10px",fontSize:11,fontWeight:500,color:C.navy,whiteSpace:"nowrap"}}>{clientName}</td>
-                    <td style={{padding:"6px 10px"}}><Badge color="navy">{t.selector}</Badge></td>
-                    <td style={{padding:"6px 10px"}}><Badge color={typeColor}>{t.txtype}</Badge></td>
-                    <td style={{padding:"6px 10px",fontFamily:"Space Grotesk,sans-serif",fontWeight:600,color:C.navy,whiteSpace:"nowrap"}}>{t.ticker}</td>
-                    <td style={{padding:"6px 10px",color:C.text,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
-                    <td style={{padding:"6px 10px"}}><Badge color={t.ccy==="GBP"?"navy":"info"}>{t.ccy}</Badge></td>
-                    <td style={{padding:"6px 10px",textAlign:"right",color:C.text}}>{t.qty!== 0 ?fmt(Math.abs(t.qty),4):"--"}</td>
-                    <td style={{padding:"6px 10px",textAlign:"right",fontWeight:600,color:C.navy}}>{fmt(t.consideration)}</td>
-                    <td style={{padding:"6px 10px",textAlign:"right",color:posColor(t.netamt),fontWeight:500}}>{fmt(t.netamt)}</td>
-                    <td style={{padding:"6px 10px",textAlign:"right",color:C.faint}}>{t.costprice!== 0 ?fmt(t.costprice,4):"--"}</td>
-                    <td style={{padding:"6px 10px",textAlign:"right",color:C.faint}}>{t.costvalue!== 0 ?fmt(t.costvalue):"--"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {result.length>600&&<div style={{padding:"9px 14px",fontSize:11,color:C.faint,borderTop:"0.5px solid "+C.silver,background:"#FAFBFC"}}>Showing 600 of {result.length} matching rows. Use filters or search to narrow results.</div>}
-      </div>
-
-      {showAdd&&<Modal title="Add transaction" onClose={()=>setShowAdd(false)}>
-        <FldSelect label="Client" value={newTxn.clientId} onChange={v=>setNewTxn({...newTxn,clientId:v})} options={[{value:"",label:"Select client..."}, ...CLIENTS.map(c=>({value:c.id,label:c.name}))]}/>
-        <FldSelect label="Type" value={newTxn.txtype} onChange={v=>setNewTxn({...newTxn,txtype:v})} options={["BUY","SELL","Dividend","Fee","SR Fee","FX Deposit","FX Withdrawal","Deposit","Withdrawal"].map(v=>({value:v,label:v}))}/>
-        <FldInput label="Ticker" value={newTxn.ticker} onChange={v=>setNewTxn({...newTxn,ticker:v})} placeholder="e.g. VTI"/>
-        <FldInput label="Description" value={newTxn.description} onChange={v=>setNewTxn({...newTxn,description:v})} placeholder="e.g. Advisory Fee June 2024"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <FldInput label="Qty" value={newTxn.qty} onChange={v=>setNewTxn({...newTxn,qty:v})} placeholder="100" type="number"/>
-          <FldInput label="Consideration" value={newTxn.consideration} onChange={v=>setNewTxn({...newTxn,consideration:v})} placeholder="5000.00" type="number"/>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <FldInput label="Net Amount" value={newTxn.netamt} onChange={v=>setNewTxn({...newTxn,netamt:v})} placeholder="-5000.00" type="number"/>
-          <FldSelect label="CCY" value={newTxn.ccy} onChange={v=>setNewTxn({...newTxn,ccy:v})} options={[{value:"USD",label:"USD"},{value:"GBP",label:"GBP"}]}/>
-        </div>
-        <div style={{display:"flex",gap:7,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>setShowAdd(false)}>Cancel</Btn><Btn onClick={addTxn}>Add</Btn></div>
-      </Modal>}
-    </div>
-  );
-};
-
-// --- PRICING -------------------------------------------------------
-const PRICES=[
-  {ticker:"AGBP",name:"iShares Core Glb Agg GBP-H D",ccy:"GBP",price:4.522,type:"ETF"},
-  {ticker:"ERNS",name:"iShares GBP Ultrashort Bond",ccy:"GBP",price:102.93,type:"ETF"},
-  {ticker:"EMIM",name:"iShares Core EM IMI ACC",ccy:"GBP",price:24.16,type:"ETF"},
-  {ticker:"EUXS",name:"iShares MSCI Europe Ex-UK GBP-H",ccy:"GBP",price:6.673,type:"ETF"},
-  {ticker:"GSPX",name:"iShares Core S&P 500 GBP-H D",ccy:"GBP",price:7.872,type:"ETF"},
-  {ticker:"XGIG",name:"Invesco Global HY Corp Bond",ccy:"GBP",price:27.05,type:"ETF"},
-  {ticker:"IS15",name:"iShares GBP Corp Bond 0-5Yr",ccy:"GBP",price:99.31,type:"ETF"},
-  {ticker:"CUKX",name:"iShares Core FTSE 100 ACC",ccy:"GBP",price:141.46,type:"ETF"},
-  {ticker:"IJPH",name:"iShares MSCI Japan GBP-H",ccy:"GBP",price:92.39,type:"ETF"},
-  {ticker:"CSH2",name:"Lyxor Smart Cash",ccy:"GBP",price:1097.82,type:"MMF"},
-  {ticker:"GILS",name:"Lyxor Core UK Govt Bond",ccy:"GBP",price:103.39,type:"ETF"},
-  {ticker:"VGOV",name:"Vanguard UK Gilt",ccy:"GBP",price:19.03,type:"ETF"},
-  {ticker:"VTI",name:"Vanguard Total Stock Market",ccy:"USD",price:204.14,type:"ETF"},
-  {ticker:"VWO",name:"Vanguard FTSE Emerging Markets",ccy:"USD",price:39.89,type:"ETF"},
-  {ticker:"VPL",name:"Vanguard FTSE Pacific",ccy:"USD",price:68.96,type:"ETF"},
-  {ticker:"VCSH",name:"Vanguard Short-Term Corp Bond",ccy:"USD",price:76.25,type:"ETF"},
-  {ticker:"SCHP",name:"Schwab US TIPS ETF",ccy:"USD",price:53.26,type:"ETF"},
-  {ticker:"SCHO",name:"Schwab Short-Term US Treasury",ccy:"USD",price:48.74,type:"ETF"},
-  {ticker:"DBEU",name:"Xtrackers MSCI Europe Hedged",ccy:"USD",price:37.64,type:"ETF"},
-  {ticker:"BNDX",name:"Vanguard Total Intl Bond ETF",ccy:"USD",price:50.13,type:"ETF"},
-  {ticker:"VAPX",name:"Vanguard FTSE Asia Pacific",ccy:"USD",price:19.93,type:"ETF"},
-  {ticker:"ARKK",name:"ARK Innovation ETF",ccy:"USD",price:50.17,type:"ETF"},
-  {ticker:"SGOV",name:"iShares 0-3M Treasury Bond",ccy:"USD",price:100.39,type:"ETF"},
-  {ticker:"LGLV",name:"SPDR US Large Cap Low Vol",ccy:"USD",price:145.59,type:"ETF"},
-  {ticker:"VYM",name:"Vanguard High Dividend Yield",ccy:"USD",price:107.74,type:"ETF"},
-  {ticker:"IAU",name:"iShares Gold Trust",ccy:"USD",price:38.32,type:"Commodity"},
-  {ticker:"GBPUSD",name:"GBP/USD",ccy:"USD",price:1.2618,type:"FX"},
-  {ticker:"GBPEUR",name:"GBP/EUR",ccy:"EUR",price:1.16028,type:"FX"},
-  {ticker:"EURUSD",name:"EUR/USD",ccy:"USD",price:1.0875,type:"FX"},
-  {ticker:"USDGBP",name:"USD/GBP",ccy:"GBP",price:0.79252,type:"FX"},
-];
-
-const Pricing=({selectedCcy})=>{
-  const [prices,setPrices]=useState(PRICES);
-  const [showAdd,setShowAdd]=useState(false);
-  const [search,setSearch]=useState("");
-  const [newP,setNewP]=useState({ticker:"",name:"",ccy:"USD",price:"",type:"ETF"});
-  const sym=CCY_SYMBOLS[selectedCcy]||"$";
-  const {result,sort,toggleSort}=useSortFilter(prices.filter(p=>p.ticker.toLowerCase().includes(search.toLowerCase())||p.name.toLowerCase().includes(search.toLowerCase())),{col:"ticker",dir:"asc"});
-
-  return(
-    <div style={{padding:24}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
-        <div><div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:3}}>Market data</div><div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:600,color:C.navy}}>Price file</div></div>
-        <div style={{display:"flex",gap:7}}><Btn variant="secondary">^ Upload CSV</Btn><Btn onClick={()=>setShowAdd(true)}>+ Add price</Btn></div>
-      </div>
-      <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search ticker or name..." style={{width:"100%",padding:"9px 13px",border:"1.5px solid "+C.silver,borderRadius:7,fontSize:13,fontFamily:"'Inter',sans-serif",marginBottom:14,boxSizing:"border-box",outline:"none"}}/>
-      <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,overflow:"hidden"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-          <thead><tr style={{background:C.navy}}>
-            {[["ticker","Ticker"],["name","Name"],["ccy","CCY"],["type","Type"],["price","Price"]].map(([col,label])=>(
-              <th key={col} onClick={()=>toggleSort(col)} style={{padding:"9px 14px",textAlign:"left",fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.6)",letterSpacing:1,textTransform:"uppercase",cursor:"pointer",userSelect:"none"}}>
-                {label}<SortIcon dir={sort.col===col?sort.dir:null}/>
-              </th>
+      {tab==="crm" && (
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(2,1fr)",gap:20}}>
+          <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:20}}>
+            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.navy,marginBottom:14}}>Client Details</div>
+            {[
+              {label:"Full Name", value:client.name},
+              {label:"Client ID", value:client.id},
+              {label:"Primary Code", value:client.primaryCode},
+              {label:"Client Reference", value:client.clientId},
+              {label:"Account Number", value:client.accountNumber},
+              {label:"Email", value:client.email},
+              {label:"Address", value:client.address},
+              {label:"Jurisdiction", value:client.jurisdiction},
+              {label:"Reporting CCY", value:client.reportingCcy},
+              {label:"Verified", value:client.verified?"Yes":"No"},
+            ].map(row=>(
+              <div key={row.label} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"0.5px solid "+C.silver}}>
+                <span style={{fontSize:12,color:C.faint}}>{row.label}</span>
+                <span style={{fontSize:13,fontWeight:500,color:C.navy,textAlign:"right"}}>{row.value}</span>
+              </div>
             ))}
-          </tr></thead>
-          <tbody>
-            {result.map((p,i)=>(
-              <tr key={i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2=== 0 ?C.white:"#FAFBFC"}}>
-                <td style={{padding:"9px 14px",fontFamily:"Space Grotesk,sans-serif",fontWeight:600,color:C.navy}}>{p.ticker}</td>
-                <td style={{padding:"9px 14px",color:C.text}}>{p.name}</td>
-                <td style={{padding:"9px 14px"}}><Badge color={p.ccy==="GBP"?"navy":p.type==="FX"?"gold":"info"}>{p.ccy}</Badge></td>
-                <td style={{padding:"9px 14px"}}><Badge color="info">{p.type}</Badge></td>
-                <td style={{padding:"9px 14px",fontFamily:"Space Grotesk,sans-serif",fontWeight:600,color:C.navy,textAlign:"right"}}>
-                  {p.type==="FX" ? fmt(p.price,5) : (p.ccy==="GBP"?"GBP":"$")+fmt(p.price)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {showAdd&&<Modal title="Add price" onClose={()=>setShowAdd(false)}>
-        <FldInput label="Ticker" value={newP.ticker} onChange={v=>setNewP({...newP,ticker:v})} placeholder="e.g. VWRL"/>
-        <FldInput label="Name" value={newP.name} onChange={v=>setNewP({...newP,name:v})} placeholder="e.g. Vanguard FTSE All-World"/>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          <FldSelect label="CCY" value={newP.ccy} onChange={v=>setNewP({...newP,ccy:v})} options={[{value:"USD",label:"USD"},{value:"GBP",label:"GBP"},{value:"EUR",label:"EUR"}]}/>
-          <FldSelect label="Type" value={newP.type} onChange={v=>setNewP({...newP,type:v})} options={["ETF","Stock","Bond","MMF","Commodity","FX"].map(v=>({value:v,label:v}))}/>
-        </div>
-        <FldInput label="Price" value={newP.price} onChange={v=>setNewP({...newP,price:v})} placeholder="99.31" type="number"/>
-        <div style={{display:"flex",gap:7,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>setShowAdd(false)}>Cancel</Btn><Btn onClick={()=>{setPrices([...prices,{...newP,price:parseFloat(newP.price)}]);setShowAdd(false);setNewP({ticker:"",name:"",ccy:"USD",price:"",type:"ETF"});}}>Add price</Btn></div>
-      </Modal>}
-    </div>
-  );
-};
-
-// --- VALUATIONS ----------------------------------------------------
-const Valuations=({setSection,setSelectedClient,selectedCcy})=>{
-  const sym=CCY_SYMBOLS[selectedCcy]||"$";
-  const rows=CLIENTS.map(c=>{
-    const t=clientTotals(c.id,selectedCcy);
-    const hs=HOLDINGS[c.id]||[];
-    return{...c,...t,equityVal:hs.filter(h=>!h.isCash).reduce((s,h)=>s+convertAmount(h.value,h.ccy,selectedCcy),0),cashVal:hs.filter(h=>h.isCash).reduce((s,h)=>s+convertAmount(h.value,h.ccy,selectedCcy),0),positions:hs.filter(h=>!h.isCash).length};
-  });
-  const totalAUM=rows.reduce((s,r)=>s+r.totalValue,0);
-  const totalCost=rows.reduce((s,r)=>s+r.totalCost,0);
-  const totalPL=totalAUM-totalCost;
-
-  return(
-    <div style={{padding:24}}>
-      <div style={{marginBottom:18}}><div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:3}}>Calculated</div><div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:600,color:C.navy}}>Valuations <span style={{fontSize:14,fontWeight:400,color:C.faint}}>in {selectedCcy}</span></div></div>
-      <div style={{background:C.navy,borderRadius:10,padding:"18px 22px",marginBottom:14,display:"flex",gap:32,alignItems:"center",flexWrap:"wrap"}}>
-        <div><div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:4}}>Total AUM</div><div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:30,fontWeight:700,color:C.white}}>{sym}{fmt(totalAUM,0)}</div></div>
-        <div style={{height:40,width:1,background:"rgba(255,255,255,0.1)"}}/>
-        <div><div style={{fontSize:10,color:"rgba(255,255,255,0.38)",marginBottom:2}}>Cost basis</div><div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:18,fontWeight:600,color:"rgba(255,255,255,0.7)"}}>{sym}{fmt(totalCost,0)}</div></div>
-        <div><div style={{fontSize:10,color:"rgba(255,255,255,0.38)",marginBottom:2}}>Total P&L</div><div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:18,fontWeight:600,color:totalPL>= 0 ?"#34D399":"#F87171"}}>{sign(totalPL)}{sym}{fmt(Math.abs(totalPL),0)}</div></div>
-        <div><div style={{fontSize:10,color:"rgba(255,255,255,0.38)",marginBottom:2}}>Return</div><div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:18,fontWeight:600,color:totalPL>= 0 ?"#34D399":"#F87171"}}>{pct(calcPct(totalCost,totalAUM))}</div></div>
-      </div>
-      <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,overflow:"hidden",marginBottom:16}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-          <thead><tr style={{background:C.navy}}>{["Client","Equity Value","Cash Value","Total Value","Cost Basis","P&L","Return","Positions",""].map(h=><th key={h} style={{padding:"9px 13px",textAlign:"left",fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.6)",letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
-          <tbody>
-            {rows.map((r,i)=>(
-              <tr key={r.id} style={{borderBottom:"0.5px solid "+C.silver,background:i%2=== 0 ?C.white:"#FAFBFC"}}>
-                <td style={{padding:"11px 13px"}}><div style={{fontSize:13,fontWeight:600,color:C.navy}}>{r.name}</div><div style={{fontSize:10,color:C.faint}}>{r.id}</div></td>
-                <td style={{padding:"11px 13px",textAlign:"right",color:C.text}}>{sym}{fmt(r.equityVal,0)}</td>
-                <td style={{padding:"11px 13px",textAlign:"right",color:C.faint}}>{sym}{fmt(r.cashVal,0)}</td>
-                <td style={{padding:"11px 13px",textAlign:"right",fontFamily:"Space Grotesk,sans-serif",fontWeight:700,color:C.navy,fontSize:14}}>{sym}{fmt(r.totalValue,0)}</td>
-                <td style={{padding:"11px 13px",textAlign:"right",color:C.text}}>{sym}{fmt(r.totalCost,0)}</td>
-                <td style={{padding:"11px 13px",textAlign:"right",fontWeight:600,color:posColor(r.pl)}}>{sign(r.pl)}{sym}{fmt(Math.abs(r.pl),0)}</td>
-                <td style={{padding:"11px 13px",textAlign:"right",fontWeight:600,color:posColor(r.pctReturn)}}>{pct(r.pctReturn)}</td>
-                <td style={{padding:"11px 13px",textAlign:"right",color:C.text}}>{r.positions}</td>
-                <td style={{padding:"11px 13px"}}><Btn small variant="ghost" onClick={()=>{setSelectedClient(r.id);setSection("clients");}}>Detail &gt;</Btn></td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot><tr style={{background:C.navy}}>
-            <td style={{padding:"10px 13px",color:C.white,fontWeight:600}}>Total</td>
-            <td style={{padding:"10px 13px",textAlign:"right",color:"rgba(255,255,255,0.5)"}}>{sym}{fmt(rows.reduce((s,r)=>s+r.equityVal,0),0)}</td>
-            <td style={{padding:"10px 13px",textAlign:"right",color:"rgba(255,255,255,0.38)"}}>{sym}{fmt(rows.reduce((s,r)=>s+r.cashVal,0),0)}</td>
-            <td style={{padding:"10px 13px",textAlign:"right",color:C.white,fontFamily:"Space Grotesk,sans-serif",fontWeight:700,fontSize:15}}>{sym}{fmt(totalAUM,0)}</td>
-            <td style={{padding:"10px 13px",textAlign:"right",color:"rgba(255,255,255,0.5)"}}>{sym}{fmt(totalCost,0)}</td>
-            <td style={{padding:"10px 13px",textAlign:"right",color:totalPL>= 0 ?"#34D399":"#F87171",fontWeight:700}}>{sign(totalPL)}{sym}{fmt(Math.abs(totalPL),0)}</td>
-            <td style={{padding:"10px 13px",textAlign:"right",color:totalPL>= 0 ?"#34D399":"#F87171",fontWeight:600}}>{pct(calcPct(totalCost,totalAUM))}</td>
-            <td colSpan={2}/>
-          </tr></tfoot>
-        </table>
-      </div>
-      <div style={{fontSize:11,fontWeight:600,color:C.faint,letterSpacing:2,textTransform:"uppercase",marginBottom:10}}>Top positions (all clients)</div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:9}}>
-        {Object.entries(HOLDINGS).flatMap(([cid,hs])=>hs.filter(h=>!h.isCash).map(h=>({...h,client:(CLIENTS.find(c=>c.id===cid)||{name:cid}).name.split(" ")[0],convVal:convertAmount(h.value,h.ccy,selectedCcy)}))).sort((a,b)=>b.convVal-a.convVal).slice(0,8).map((h,i)=>(
-          <div key={i} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:8,padding:"13px 15px"}}>
-            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}><span style={{fontFamily:"Space Grotesk,sans-serif",fontWeight:700,color:C.navy,fontSize:14}}>{h.ticker}</span><Badge color={h.ccy==="GBP"?"navy":"info"}>{h.ccy}</Badge></div>
-            <div style={{fontSize:11,color:C.faint,marginBottom:7,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.name}</div>
-            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:17,fontWeight:600,color:C.navy}}>{sym}{fmt(h.convVal,0)}</div>
-            <div style={{fontSize:11,color:C.faint,marginTop:1}}>{h.client}</div>
           </div>
-        ))}
+          <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:20}}>
+            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.navy,marginBottom:14}}>Bank Details</div>
+            {[
+              {label:"Bank Name", value:client.bankName},
+              {label:"Account Number", value:client.bankAccount},
+              {label:"Sort Code", value:client.bankSort},
+            ].map(row=>(
+              <div key={row.label} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"0.5px solid "+C.silver}}>
+                <span style={{fontSize:12,color:C.faint}}>{row.label}</span>
+                <span style={{fontSize:13,fontWeight:500,color:C.navy}}>{row.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --- CLIENTS LIST ------------------------------------------------------------
+const ClientsList = ({selectedClient, setSelectedClient, selectedCcy}) => {
+  const [search, setSearch] = useState("");
+  const isMobile = useIsMobile();
+  const sym = CCY_SYMBOLS[selectedCcy] || "$";
+
+  if (selectedClient) {
+    return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy}/>;
+  }
+
+  const filtered = CLIENTS.filter(c =>
+    !search || [c.name, c.id, c.primaryCode, c.email].some(v => v && v.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  return (
+    <div style={{padding:isMobile?"12px":24}}>
+      <div style={{marginBottom:16}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:3,textTransform:"uppercase",color:C.teal,marginBottom:3}}>Client Management</div>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?20:24,fontWeight:600,color:C.navy}}>All Clients</div>
+      </div>
+      <div style={{display:"flex",gap:10,marginBottom:16}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name, ID or email..." style={{padding:"8px 12px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",flex:1,color:C.navy}}/>
+      </div>
+      <div style={{fontSize:12,color:C.faint,marginBottom:12}}>{filtered.length} client{filtered.length!==1?"s":""}</div>
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+          <thead>
+            <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+              {["Client","ID","Jurisdiction","Reporting CCY","Asset Valuation","Cash","Liabilities","Status"].map(h=>(
+                <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(c=>{
+              const val = VALUATIONS[c.id];
+              return (
+                <tr key={c.id} onClick={()=>setSelectedClient(c.id)} style={{borderBottom:"0.5px solid "+C.silver,cursor:"pointer",transition:"background 0.1s"}}
+                  onMouseEnter={e=>e.currentTarget.style.background="#F8FAFB"}
+                  onMouseLeave={e=>e.currentTarget.style.background=""}>
+                  <td style={{padding:"12px 12px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <div style={{width:32,height:32,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:11,fontWeight:700,flexShrink:0}}>
+                        {c.name.split(" ").map(n=>n[0]).join("")}
+                      </div>
+                      <div>
+                        <div style={{fontWeight:600,color:C.navy}}>{c.name}</div>
+                        <div style={{fontSize:11,color:C.faint}}>{c.email}</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td style={{padding:"12px 12px",color:C.faint,fontSize:11,fontFamily:"monospace"}}>{c.primaryCode}</td>
+                  <td style={{padding:"12px 12px",color:C.text}}>{c.jurisdiction}</td>
+                  <td style={{padding:"12px 12px",color:C.text}}>{c.reportingCcy}</td>
+                  <td style={{padding:"12px 12px",fontWeight:600,color:C.navy,fontFamily:"Space Grotesk,sans-serif"}}>{val?sym+fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),0):"--"}</td>
+                  <td style={{padding:"12px 12px",color:C.green,fontWeight:600}}>{val?sym+fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),0):"--"}</td>
+                  <td style={{padding:"12px 12px",color:C.red,fontWeight:600}}>{val?sym+fmt(convertAmount(val.totalLiabilities,"USD",selectedCcy),0):"--"}</td>
+                  <td style={{padding:"12px 12px"}}><Badge color={c.verified?"success":"warning"}>{c.verified?"Verified":"Pending"}</Badge></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
 };
 
-// --- NEWS (Bloomberg feed) -----------------------------------------
-const Connect=()=>{
-  const [connected,setConnected]=useState(["bloomberg"]);
-  const [showModal,setShowModal]=useState(null);
-  const apps=[
-    {id:"bloomberg",name:"Bloomberg",category:"Market Data",desc:"Real-time prices, news, analytics & FX rates. Currently providing live data to i-Convergence.",icon:"B"},
-    {id:"refinitiv",name:"Refinitiv Eikon",category:"Market Data",desc:"Financial data, news, and analytics platform.",icon:"R"},
-    {id:"plaid",name:"Plaid",category:"Banking",desc:"Connect 12,000+ financial institutions for live account & transaction feeds.",icon:"P"},
-    {id:"monzo",name:"Monzo Business",category:"Banking",desc:"UK business banking with real-time transaction feeds.",icon:"●"},
-    {id:"barclays",name:"Barclays Open Banking",category:"Banking",desc:"PSD2 Open Banking API for account data.",icon:"B"},
-    {id:"hsbc",name:"HSBC Open Banking",category:"Banking",desc:"HSBC account and transaction data.",icon:"H"},
-    {id:"factset",name:"FactSet",category:"Analytics",desc:"Institutional-grade financial data and portfolio analytics.",icon:"F"},
-    {id:"morningstar",name:"Morningstar Direct",category:"Analytics",desc:"Investment research, ratings, and portfolio analysis.",icon:"M"},
-    {id:"salesforce",name:"Salesforce FSC",category:"CRM",desc:"Sync client data, activities and opportunities with Salesforce Financial Services Cloud.",icon:"C"},
-    {id:"docusign",name:"DocuSign",category:"Documents",desc:"Electronic signatures and document workflow automation.",icon:"D"},
-    {id:"xero",name:"Xero",category:"Accounting",desc:"Accounting and invoicing integration for fee management.",icon:"H"},
-    {id:"sendgrid",name:"SendGrid",category:"Email",desc:"Bulk and transactional email for client communications.",icon:"@"},
-    {id:"onedrive",name:"OneDrive / Excel",category:"Data Sources",desc:"Connect client data, holdings, transactions and distributions from Excel files hosted on OneDrive or SharePoint.",icon:"X"},
-    {id:"sharepoint",name:"SharePoint",category:"Data Sources",desc:"Import and sync data from SharePoint lists and document libraries.",icon:"S"},
-  ];
-  const cats=[...new Set(apps.map(a=>a.category))];
-  return(
+// --- WITHDRAWALS PAGE --------------------------------------------------------
+const WithdrawalsPage = ({selectedCcy}) => {
+  const sym = CCY_SYMBOLS[selectedCcy] || "$";
+  const allWithdrawals = Object.entries(WITHDRAWALS).flatMap(([clientId, wds]) =>
+    wds.map(w => ({ ...w, clientId, clientName: CLIENTS.find(c=>c.id===clientId)?.name || clientId }))
+  );
+  const total = allWithdrawals.reduce((s,w)=>s+convertAmount(w.actualPaid,"USD",selectedCcy),0);
+
+  return (
     <div style={{padding:24}}>
-      <div style={{marginBottom:18}}><div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:3}}>Integrations</div><div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:600,color:C.navy}}>Connect external apps</div></div>
-      <div style={{background:C.tealLight,borderRadius:10,padding:"12px 16px",marginBottom:18,display:"flex",alignItems:"center",gap:10}}>
-        <div style={{width:7,height:7,borderRadius:"50%",background:C.teal,flexShrink:0}}/>
-        <div style={{fontSize:13,color:C.tealMid}}><strong>Bloomberg connected</strong> -- syncing prices and news every 15 minutes. FX rates from price file active.</div>
+      <div style={{marginBottom:18}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:3,textTransform:"uppercase",color:C.teal,marginBottom:3}}>Processed Withdrawals</div>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:24,fontWeight:600,color:C.navy}}>Withdrawal History</div>
       </div>
+      <div style={{background:C.navy,borderRadius:10,padding:"16px 20px",marginBottom:20,display:"inline-block"}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:4}}>Total Paid Out</div>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:28,fontWeight:700,color:C.white}}>{sym}{fmt(total,2)}</div>
+      </div>
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+          <thead>
+            <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+              {["Client","Date Requested","Type","Currency","Requested","Actual Paid","Payment Date"].map(h=>(
+                <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {allWithdrawals.map((w,i)=>(
+              <tr key={i} style={{borderBottom:"0.5px solid "+C.silver}}>
+                <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>{w.clientName}</td>
+                <td style={{padding:"10px 12px",color:C.text}}>{w.dateRequested}</td>
+                <td style={{padding:"10px 12px"}}><Badge color="info">{w.type}</Badge></td>
+                <td style={{padding:"10px 12px",color:C.faint}}>{w.currency}</td>
+                <td style={{padding:"10px 12px",color:C.navy}}>${fmt(w.requestedAmount,2)}</td>
+                <td style={{padding:"10px 12px",fontWeight:600,color:C.green}}>${fmt(w.actualPaid,2)}</td>
+                <td style={{padding:"10px 12px",color:C.text}}>{w.paymentDate}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
+// --- CONNECT PAGE ------------------------------------------------------------
+const Connect = () => {
+  const [connected, setConnected] = useState(["onedrive"]);
+  const apps = [
+    {id:"onedrive", name:"OneDrive / Excel", category:"Data Sources", desc:"Client data, holdings, valuations and distributions from Excel files on OneDrive.", icon:"X"},
+    {id:"sharepoint", name:"SharePoint", category:"Data Sources", desc:"Import and sync data from SharePoint lists and libraries.", icon:"S"},
+    {id:"bloomberg", name:"Bloomberg", category:"Market Data", desc:"Real-time prices, news and FX rates.", icon:"B"},
+    {id:"refinitiv", name:"Refinitiv Eikon", category:"Market Data", desc:"Financial data, news and analytics.", icon:"R"},
+    {id:"docusign", name:"DocuSign", category:"Documents", desc:"Electronic signatures and document workflow.", icon:"D"},
+    {id:"sendgrid", name:"SendGrid", category:"Email", desc:"Bulk and transactional email for client communications.", icon:"@"},
+  ];
+  const cats = [...new Set(apps.map(a=>a.category))];
+  return (
+    <div style={{padding:24}}>
+      <div style={{marginBottom:18}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:3}}>Integrations</div>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:600,color:C.navy}}>Connect external apps</div>
+      </div>
+      {connected.includes("onedrive") && (
+        <div style={{background:C.tealLight,borderRadius:10,padding:"12px 16px",marginBottom:18,display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:C.teal,flexShrink:0}}/>
+          <span style={{fontSize:13,color:C.teal,fontWeight:600}}>OneDrive connected</span>
+          <span style={{fontSize:13,color:C.text}}> — client data synced from Excel files.</span>
+        </div>
+      )}
       {cats.map(cat=>(
         <div key={cat} style={{marginBottom:20}}>
           <div style={{fontSize:11,fontWeight:600,color:C.faint,letterSpacing:2,textTransform:"uppercase",marginBottom:10}}>{cat}</div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:10}}>
             {apps.filter(a=>a.category===cat).map(app=>{
-              const isConn=connected.includes(app.id);
-              return(
+              const isConn = connected.includes(app.id);
+              return (
                 <div key={app.id} style={{background:C.white,border:"0.5px solid "+(isConn?C.teal:C.silver),borderRadius:10,padding:16}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:9}}>
                     <div style={{display:"flex",gap:9,alignItems:"center"}}>
-                      <div style={{width:32,height:32,borderRadius:8,background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:13,fontWeight:700,flexShrink:0}}>{app.icon}</div>
+                      <div style={{width:32,height:32,borderRadius:8,background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:13,fontWeight:700}}>{app.icon}</div>
                       <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:13,fontWeight:600,color:C.navy}}>{app.name}</div>
                     </div>
-                    {isConn&&<Badge color="success">Live</Badge>}
+                    {isConn && <Badge color="success">Live</Badge>}
                   </div>
-                  <div style={{fontSize:12,color:C.faint,lineHeight:1.6,marginBottom:10}}>{app.desc}</div>
-                  {isConn?<Btn small variant="secondary" onClick={()=>setConnected(connected.filter(c=>c!==app.id))}>Disconnect</Btn>:<Btn small onClick={()=>setShowModal(app)}>Connect &gt;</Btn>}
+                  <div style={{fontSize:12,color:C.faint,marginBottom:12}}>{app.desc}</div>
+                  <Btn variant={isConn?"secondary":"primary"} small onClick={()=>setConnected(p=>isConn?p.filter(x=>x!==app.id):[...p,app.id])}>
+                    {isConn?"Disconnect":"Connect"}
+                  </Btn>
                 </div>
               );
             })}
           </div>
         </div>
       ))}
-      {showModal&&<Modal title={"Connect "+showModal.name} onClose={()=>setShowModal(null)}>
-        <div style={{display:"flex",gap:12,alignItems:"center",marginBottom:18}}><div style={{width:44,height:44,borderRadius:10,background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:18,fontWeight:700}}>{showModal.icon}</div><div><div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:600,color:C.navy}}>{showModal.name}</div><div style={{fontSize:12,color:C.faint}}>{showModal.category}</div></div></div>
-        <div style={{background:C.silver,borderRadius:8,padding:14,marginBottom:16,fontSize:13,color:C.text,lineHeight:1.6}}>{showModal.desc}</div>
-        <FldInput label="API Key / Client ID" value="" onChange={()=>{}} placeholder="Enter credentials..."/>
-        <FldInput label="Secret / Token" value="" onChange={()=>{}} placeholder="**********" type="password"/>
-        <div style={{fontSize:11,color:C.faint,marginBottom:14}}>Credentials are encrypted at rest. i-Convergence never stores plaintext keys.</div>
-        <div style={{display:"flex",gap:7,justifyContent:"flex-end"}}><Btn variant="secondary" onClick={()=>setShowModal(null)}>Cancel</Btn><Btn onClick={()=>{setConnected([...connected,showModal.id]);setShowModal(null);}}>Authorise</Btn></div>
-      </Modal>}
     </div>
   );
 };
 
-// --- ROOT ----------------------------------------------------------
-
-
-// --- RISK / ASSET CLASS DATA --------------------------------------
-
-
-
-
-// --- SAMPLE DOCS ---------------------------------------------------
-
-// --- DEFAULT ALERTS ------------------------------------------------
-
-// --- AI PORTFOLIO ASSISTANT -----------------------------------------
-const SUGGESTED_PROMPTS = [
-  "What are the key risks across all client portfolios right now?",
-  "Which clients have the highest concentration risk?",
-  "Give me a market outlook for global equities this quarter",
-  "Are any clients breaching their investment mandate?",
-  "What is the outlook for GBP-hedged ETFs given current FX rates?",
-  "Summarise Hash Murji's portfolio and flag any concerns",
-  "Which holdings have the worst unrealised P&L across all clients?",
-  "What would a rebalance look like for Lyndsey Starkie?",
-];
-
-// API key -- reads from Vite env var in production, empty string in artifact preview
-// API key -- injected via window.__ANTHROPIC_KEY in index.html for Vercel deployment
-const ANTHROPIC_API_KEY = (typeof window !== "undefined" && window.__ANTHROPIC_KEY) ? window.__ANTHROPIC_KEY : "";
-
-const buildPortfolioContext = (selectedClient) => {
-  const clientSummaries = CLIENTS.map(c => {
-    const hs = HOLDINGS[c.id] || [];
-    const total = hs.reduce((s,h)=>s+h.value,0);
-    const cost  = hs.reduce((s,h)=>s+h.cost,0);
-    const topH  = [...hs].sort((a,b)=>b.value-a.value).slice(0,5).map(h=>(h.ticker+" $"+Math.round(h.value).toLocaleString())).join(", ");
-    return c.name+" ("+c.id+"): Portfolio $"+Math.round(total).toLocaleString()+", Cost $"+Math.round(cost).toLocaleString()+", P&L "+(total>= cost ?"+":"")+"$"+Math.round(total-cost).toLocaleString()+". Top holdings: "+topH+".";
-  }).join("\n");
-  const focusNote = selectedClient
-    ? "\nThe adviser is currently viewing client: "+(CLIENTS.find(c=>c.id===selectedClient)||{name:selectedClient}).name+" specifically.\n"
-    : "";
-  return "You are an AI portfolio assistant for i-Convergence, a financial platform management system. You have access to the following live client portfolio data:\n\n"+clientSummaries+focusNote+"\nFX rates: GBP/USD 1.2618, GBP/EUR 1.1603, USD/CNY 7.24.\nToday\'s date: "+new Date().toLocaleDateString("en-GB")+".\nProvide concise, professional financial analysis. Always note that insights are for adviser reference only and not investment advice.";
-};
-
-const DocVaultPage = () => {
-  const isMobile = useIsMobile();
-  const [docs, setDocs] = useState(() => {
-    const all = [];
-    Object.entries(DEFAULT_DOCS).forEach(([cid, ds]) => ds.forEach(d => all.push({ ...d, clientId: cid, clientName: (CLIENTS.find(c => c.id === cid) || {name: cid}).name })));
-    return all;
-  });
-  const [filterClient, setFilterClient] = useState("all");
-  const [filterType, setFilterType] = useState("all");
-  const [uploadClient, setUploadClient] = useState(CLIENTS[0].id);
-  const [uploadType, setUploadType] = useState("KYC");
-  const [showUpload, setShowUpload] = useState(false);
-
-  const typeColour = { KYC: "navy", "Suitability": "success", "Mandate": "info", "Risk Disclosure": "warning", "Authorisation": "gold" };
-  const typeIcon   = { KYC: "ID", "Suitability": "OK", "Mandate": "D", "Risk Disclosure": "!", "Authorisation": "S" };
-  const docTypes = ["KYC", "Suitability", "Mandate", "Risk Disclosure", "Authorisation"];
-
-  const filtered = docs.filter(d => (filterClient === "all" || d.clientId === filterClient) && (filterType === "all" || d.type === filterType));
-
-  const handleDrop = (e) => {
-    e.preventDefault();
-    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
-    if (files.length && uploadClient) {
-      const clientName = (CLIENTS.find(c => c.id === uploadClient) || {name: uploadClient}).name;
-      const newDocs = files.map((f, i) => ({ id: Date.now() + i, name: f.name, type: uploadType, date: new Date().toISOString().slice(0, 10), size: (f.size / 1024).toFixed(0) + " KB", uploader: "JW", clientId: uploadClient, clientName }));
-      setDocs([...newDocs, ...docs]);
-      setShowUpload(false);
-    }
-  };
-
-  return (
-    <div style={{ padding: isMobile ? "12px 10px" : 24 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 10, fontWeight: 600, letterSpacing: 3, color: C.teal, textTransform: "uppercase", marginBottom: 3 }}>Compliance</div>
-          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 22, fontWeight: 600, color: C.navy }}>Document vault</div>
-        </div>
-        <Btn onClick={() => setShowUpload(true)}>+ Upload document</Btn>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ padding: "7px 10px", border: "1.5px solid " + C.silver, borderRadius: 6, fontSize: 12, fontFamily: "'Inter',sans-serif", color: C.navy, background: C.white }}>
-          <option value="all">All clients</option>
-          {CLIENTS.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
-        <select value={filterType} onChange={e => setFilterType(e.target.value)} style={{ padding: "7px 10px", border: "1.5px solid " + C.silver, borderRadius: 6, fontSize: 12, fontFamily: "'Inter',sans-serif", color: C.navy, background: C.white }}>
-          <option value="all">All types</option>
-          {docTypes.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
-        <span style={{ fontSize: 12, color: C.faint, display: "flex", alignItems: "center" }}>{filtered.length} document{filtered.length !== 1 ? "s" : ""}</span>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2,1fr)", gap: 10 }}>
-        {filtered.map(doc => (
-          <div key={doc.id} style={{ background: C.white, border: "0.5px solid " + C.silver, borderRadius: 10, padding: "14px 16px", display: "flex", gap: 12, alignItems: "flex-start" }}>
-            <span style={{ fontSize: 26, flexShrink: 0 }}>{typeIcon[doc.type] || "Doc"}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, color: C.navy, fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{doc.name}</div>
-              <div style={{ display: "flex", gap: 6, marginTop: 5, flexWrap: "wrap" }}>
-                <Badge color={typeColour[doc.type] || "info"}>{doc.type}</Badge>
-                <Badge color="navy">{doc.clientName}</Badge>
-              </div>
-              <div style={{ fontSize: 11, color: C.faint, marginTop: 5 }}>{doc.date} . {doc.size} . {doc.uploader}</div>
-            </div>
-            <Btn small variant="ghost">View</Btn>
-          </div>
-        ))}
-      </div>
-
-      {showUpload && (
-        <Modal title="Upload document" onClose={() => setShowUpload(false)}>
-          <FldSelect label="Client" value={uploadClient} onChange={setUploadClient} options={CLIENTS.map(c => ({ value: c.id, label: c.name }))} />
-          <FldSelect label="Document type" value={uploadType} onChange={setUploadType} options={docTypes.map(t => ({ value: t, label: t }))} />
-          <div onDrop={handleDrop} onDragOver={e => e.preventDefault()}
-            style={{ background: C.silver, borderRadius: 8, padding: 32, textAlign: "center", marginBottom: 16, border: "2px dashed " + C.silverMid, cursor: "pointer" }}
-            onClick={() => { const el = document.getElementById("vaultFileInput"); if (el) el.click(); }}>
-            <div style={{ fontSize: 32, marginBottom: 8 }}>D</div>
-            <div style={{ fontSize: 13, color: C.text, marginBottom: 4 }}>Drag and drop files here</div>
-            <div style={{ fontSize: 11, color: C.faint }}>PDF, DOCX, XLSX supported</div>
-            <input id="vaultFileInput" type="file" multiple style={{ display: "none" }} onChange={e => {
-              const files = Array.from(e.target.files || []);
-              if (files.length) {
-                const clientName = (CLIENTS.find(c => c.id === uploadClient) || {name: uploadClient}).name;
-                const newDocs = files.map((f, i) => ({ id: Date.now() + i, name: f.name, type: uploadType, date: new Date().toISOString().slice(0, 10), size: (f.size / 1024).toFixed(0) + " KB", uploader: "JW", clientId: uploadClient, clientName }));
-                setDocs([...newDocs, ...docs]);
-                setShowUpload(false);
-              }
-            }} />
-          </div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Btn variant="secondary" onClick={() => setShowUpload(false)}>Cancel</Btn>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-};
-
-
-
-// --- WITHDRAWALS PAGE ---------------------------------------------
-const WithdrawalsPage=()=>{
-  const isMobile=useIsMobile();
-  const [requests,setRequests]=useState([]);
-  const [statusMap,setStatusMap]=useState({});
-  const [loading,setLoading]=useState(true);
-  const [syncing,setSyncing]=useState(false);
-  const [filter,setFilter]=useState("all");
-  const [showSetup,setShowSetup]=useState(false);
-  const [sheetId,setSheetId]=useState("");
-  const [apiKey2,setApiKey2]=useState("");
-
-  useEffect(()=>{ loadRequests().then(r=>{setRequests(r);setLoading(false);}); },[]);
-
-  const syncStatuses=async()=>{
-    setSyncing(true);
-    const map=await readSheetStatuses();
-    setStatusMap(map);
-    if(Object.keys(map).length>0){
-      const updated=requests.map(r=>map[r.id]?{...r,status:map[r.id]}:r);
-      await saveRequests(updated);
-      setRequests(updated);
-    }
-    setSyncing(false);
-  };
-
-  const filtered=filter==="all"?requests:requests.filter(r=>{
-    const live=statusMap[r.id]||r.status;
-    if(filter==="pending") return live==="Pending";
-    if(filter==="actioned") return live==="Actioned"||live==="Completed";
-    return true;
-  });
-
-  const pendingCount=requests.filter(r=>(statusMap[r.id]||r.status)==="Pending").length;
-
-  const exportCSV=()=>{
-    const nl="\n";
-    const hdr="Request ID,Date,Client,Type,Amount,CCY,Notes,Status"+nl;
-    const rows=requests.map(r=>[r.id,r.date,r.clientName,r.type,r.amount,r.ccy,(r.notes||"").split(",").join(";"),statusMap[r.id]||r.status].join(",")).join(nl);
-    const blob=new Blob([hdr+rows],{type:"text/csv"});
-    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="withdrawals.csv";a.click();
-  };
-
-  return(
-    <div style={{padding:isMobile?"12px 10px":24}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:12}}>
-        <div>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:3}}>Back-office</div>
-          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:600,color:C.navy,display:"flex",alignItems:"center",gap:10}}>
-            Withdrawal requests
-            {pendingCount>0&&<span style={{background:C.amberBg,color:C.amber,fontSize:13,fontWeight:700,padding:"2px 10px",borderRadius:100}}>{pendingCount} pending</span>}
-          </div>
-        </div>
-        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-          <Btn small variant="ghost" onClick={exportCSV}>Export CSV</Btn>
-          <Btn small variant="secondary" onClick={()=>setShowSetup(true)}>Sheets setup</Btn>
-          <Btn small onClick={syncStatuses}>{syncing?"Syncing...":"Sync status"}</Btn>
-        </div>
-      </div>
-
-      <div style={{display:"flex",gap:8,marginBottom:14}}>
-        {[["all","All"],["pending","Pending"],["actioned","Actioned"]].map(([k,l])=>(
-          <button key={k} onClick={()=>setFilter(k)} style={{background:filter===k?C.navy:C.white,color:filter===k?C.white:C.text,border:"0.5px solid "+(filter===k?C.navy:C.silver),borderRadius:6,padding:"6px 14px",fontSize:12,cursor:"pointer",fontFamily:"'Inter',sans-serif",fontWeight:filter===k?600:400}}>
-            {l}{k==="pending"&&pendingCount> 0 ?" ("+pendingCount+")":""}
-          </button>
-        ))}
-      </div>
-
-      {loading?(
-        <div style={{padding:40,textAlign:"center",color:C.faint}}>Loading...</div>
-      ):requests.length=== 0 ?(
-        <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:40,textAlign:"center"}}>
-          <div style={{fontSize:32,marginBottom:12}}>v</div>
-          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:600,color:C.navy,marginBottom:6}}>No withdrawal requests</div>
-          <div style={{fontSize:13,color:C.faint}}>Submit requests from client profiles.</div>
-        </div>
-      ):(
-        <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,overflow:"hidden"}}>
-          <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-              <thead><tr style={{background:C.navy}}>
-                {["Request ID","Date","Client","Type","Amount","CCY","Notes","Status"].map(h=>(
-                  <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.6)",letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {filtered.map((r,i)=>{
-                  const live=statusMap[r.id]||r.status;
-                  const isActioned=live==="Actioned"||live==="Completed";
-                  return(
-                    <tr key={r.id} style={{borderBottom:"0.5px solid "+C.silver,background:i%2=== 0 ?C.white:"#FAFBFC"}}>
-                      <td style={{padding:"9px 14px",fontFamily:"monospace",fontSize:11,color:C.faint}}>{r.id}</td>
-                      <td style={{padding:"9px 14px",color:C.text,whiteSpace:"nowrap"}}>{r.date}</td>
-                      <td style={{padding:"9px 14px",fontWeight:500,color:C.navy}}>{r.clientName}</td>
-                      <td style={{padding:"9px 14px",fontWeight:600,color:C.navy}}>{r.type}</td>
-                      <td style={{padding:"9px 14px",fontFamily:"Space Grotesk,sans-serif",fontWeight:600,color:C.navy,textAlign:"right"}}>
-                        {r.ccy==="GBP"?"GBP":r.ccy==="EUR"?"EUR":r.ccy==="CNY"?"CNY":"$"}{fmt(r.amount)}
-                      </td>
-                      <td style={{padding:"9px 14px"}}><Badge color={r.ccy==="GBP"?"navy":"info"}>{r.ccy}</Badge></td>
-                      <td style={{padding:"9px 14px",color:C.text,maxWidth:180,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{r.notes||"--"}</td>
-                      <td style={{padding:"9px 14px"}}><Badge color={isActioned?"success":"warning"}>{isActioned?"Actioned":"Pending"}</Badge></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div style={{padding:"10px 14px",borderTop:"0.5px solid "+C.silver,fontSize:11,color:C.faint}}>
-            {filtered.length} request{filtered.length!==1 ?"s":""} . Update Status in Google Sheet then click Sync
-          </div>
-        </div>
-      )}
-
-      {showSetup&&(
-        <Modal title="Google Sheets setup" onClose={()=>setShowSetup(false)}>
-          <div style={{fontSize:13,color:C.text,lineHeight:1.8,marginBottom:16}}>
-            <strong>1.</strong> Create a Google Sheet, name first tab <strong>Withdrawals</strong>.<br/>
-            <strong>2.</strong> Add headers: Request ID, Date, Client ID, Client Name, Withdrawal Type, Amount, CCY, Notes, Requested By, Status<br/>
-            <strong>3.</strong> Enable Google Sheets API in Google Cloud Console and create an API key.<br/>
-            <strong>4.</strong> Share sheet as "Anyone with link can view", then paste credentials below.
-          </div>
-          <FldInput label="Spreadsheet ID" value={sheetId} onChange={setSheetId} placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms"/>
-          <FldInput label="API Key" value={apiKey2} onChange={setApiKey2} placeholder="AIzaSy..."/>
-          <div style={{background:C.silver,borderRadius:8,padding:"10px 14px",marginBottom:14,fontSize:12,color:C.text}}>
-            To make this permanent, paste the values into <code>SHEETS_CONFIG</code> at the top of App.jsx.
-          </div>
-          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-            <Btn variant="secondary" onClick={()=>setShowSetup(false)}>Close</Btn>
-            <Btn onClick={()=>{SHEETS_CONFIG.SPREADSHEET_ID=sheetId;SHEETS_CONFIG.API_KEY=apiKey2;setShowSetup(false);}}>Save</Btn>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-};
-
-
-// --- LOGIN SCREEN ------------------------------------------------------------
-const LoginScreen = ({ onLogin, loading, error }) => (
+// --- LOGIN -------------------------------------------------------------------
+const LoginScreen = ({onLogin, loading, error}) => (
   <div style={{minHeight:"100vh",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-    <div style={{width:"100%",maxWidth:400}}>
-      <div style={{textAlign:"center",marginBottom:40}}>
-        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:42,fontWeight:700,color:C.white,letterSpacing:-1,marginBottom:8}}>
-          <span style={{color:C.teal}}>i-</span>Convergence
-        </div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.4)",letterSpacing:2,textTransform:"uppercase"}}>Platform Management System</div>
+    <div style={{background:C.navyMid,borderRadius:16,padding:40,width:380,maxWidth:"100%",textAlign:"center",border:"0.5px solid rgba(0,184,176,0.2)"}}>
+      <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:28,fontWeight:700,color:C.white,marginBottom:6}}>
+        <span style={{color:C.teal}}>i-</span>Convergence
       </div>
-      <div style={{background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:16,padding:36}}>
-        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:600,color:C.white,marginBottom:6}}>Sign in</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",marginBottom:28,lineHeight:1.6}}>
-          Secure access with multi-factor authentication. You will be redirected to our identity provider.
-        </div>
-
-        {error && (
-          <div style={{background:"rgba(239,68,68,0.15)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"12px 14px",marginBottom:20,fontSize:13,color:"#FCA5A5"}}>
-            {error}
-          </div>
-        )}
-
-        <button onClick={onLogin} disabled={loading} style={{width:"100%",background:C.teal,color:C.white,border:"none",borderRadius:8,padding:"14px",fontSize:15,fontWeight:600,cursor:loading?"wait":"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",justifyContent:"center",gap:10,opacity:loading?0.7:1,transition:"opacity 0.2s"}}>
-          {loading ? (
-            <>
-              <div style={{width:18,height:18,border:"2px solid rgba(255,255,255,0.3)",borderTop:"2px solid white",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
-              Connecting...
-            </>
-          ) : (
-            <>
-              <span style={{fontSize:18}}>Login</span>
-              Continue with MFA
-            </>
-          )}
-        </button>
-
-        <div style={{marginTop:24,paddingTop:20,borderTop:"1px solid rgba(255,255,255,0.08)"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-            <div style={{width:6,height:6,borderRadius:"50%",background:C.teal,flexShrink:0}}/>
-            <span style={{fontSize:12,color:"rgba(255,255,255,0.35)"}}>Multi-factor authentication required</span>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-            <div style={{width:6,height:6,borderRadius:"50%",background:C.teal,flexShrink:0}}/>
-            <span style={{fontSize:12,color:"rgba(255,255,255,0.35)"}}>Role-based access control</span>
-          </div>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <div style={{width:6,height:6,borderRadius:"50%",background:C.teal,flexShrink:0}}/>
-            <span style={{fontSize:12,color:"rgba(255,255,255,0.35)"}}>Session expires after 8 hours</span>
-          </div>
-        </div>
-      </div>
-
-      <div style={{textAlign:"center",marginTop:24,fontSize:11,color:"rgba(255,255,255,0.2)"}}>
-        i-Convergence Financial Platform . Powered by Auth0
-      </div>
+      <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",marginBottom:32}}>Wealth Management Platform</div>
+      {error && <div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#FCA5A5"}}>{error}</div>}
+      <button onClick={onLogin} disabled={loading} style={{width:"100%",background:C.teal,color:C.white,border:"none",borderRadius:8,padding:"13px 20px",fontSize:15,fontWeight:600,cursor:loading?"not-allowed":"pointer",fontFamily:"Space Grotesk,sans-serif",opacity:loading?0.7:1}}>
+        {loading?"Signing in...":"Sign in"}
+      </button>
+      <div style={{marginTop:16,fontSize:11,color:"rgba(255,255,255,0.25)"}}>Secured by Auth0 MFA</div>
     </div>
   </div>
 );
 
-// --- CLIENT PORTAL -----------------------------------------------------------
-const ClientPortal = ({ user, logout, selectedCcy, setCcy, previewClientId }) => {
+// --- APP ---------------------------------------------------------------------
+export default function App() {
+  const {user, loading, error, login, logout} = useAuth();
+  const [section, setSection] = useState("dashboard");
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [selectedCcy, setSelectedCcy] = useState("USD");
   const isMobile = useIsMobile();
-  const clientId = previewClientId || (user && user.clientId);
-  const client = CLIENTS.find(c => c.id === clientId);
-  const sym = CCY_SYMBOLS[selectedCcy] || "$";
-  const holdings = HOLDINGS[clientId] || [];
-  const totals = clientTotals(clientId, selectedCcy);
-  const chartData = buildChart(clientId, selectedCcy);
-  const equityH = holdings.filter(h => !h.isCash);
-  const cashH = holdings.filter(h => h.isCash);
-  const [tab, setTab] = useState("portfolio");
-  const clientTxns = TXNS.filter(t => t.clientId === clientId);
-  const {result:txSorted,sort:txSort,toggleSort:txToggle,setFilter:txSetFilter,search:txSearch,setSearch:txSetSearch} = useSortFilter(clientTxns, {col:"tradedate",dir:"desc"});
-  const txTypes = [...new Set(clientTxns.map(t => t.txtype))].sort();
-
-  if (!client) return (
-    <div style={{minHeight:"100vh",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <div style={{color:C.white,fontSize:16,textAlign:"center"}}>
-        <div style={{fontSize:32,marginBottom:16}}>!</div>
-        <div>No portfolio linked to this account.</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.4)",marginTop:8}}>Please contact your adviser.</div>
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh"}}>
-      <div style={{background:C.navy,padding:"0 20px",height:54,display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:100,borderBottom:"1px solid rgba(0,184,176,0.15)"}}>
-        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:18,fontWeight:700,color:C.white}}>
-          <span style={{color:C.teal}}>i-</span>Convergence
-          {previewClientId && <span style={{fontSize:11,background:C.gold,color:C.navy,padding:"2px 8px",borderRadius:4,marginLeft:10,fontFamily:"'Inter',sans-serif",fontWeight:600}}>ADVISER PREVIEW</span>}
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:12}}>
-          <CCYSelector selectedCcy={selectedCcy} onChange={setCcy} compact={isMobile}/>
-          <div style={{fontSize:13,color:"rgba(255,255,255,0.5)",display:isMobile?"none":"block"}}>{previewClientId ? "Adviser preview" : (user && user.name)}</div>
-          <button onClick={logout} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",color:"rgba(255,255,255,0.6)",borderRadius:6,padding:"5px 12px",fontSize:12,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
-            {previewClientId ? "<- Exit preview" : "Sign out"}
-          </button>
-        </div>
-      </div>
-
-      <div style={{padding:isMobile?"12px":24,paddingBottom:40}}>
-        <div style={{marginBottom:20}}>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:4}}>{previewClientId ? "Client view preview" : "Welcome back"}</div>
-          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:24,fontWeight:700,color:C.navy}}>{client.name}</div>
-          <div style={{fontSize:13,color:C.faint,marginTop:2}}>{client.code} . {client.jurisdiction}</div>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(3,1fr)",gap:12,marginBottom:20}}>
-          <div style={{background:C.navy,borderRadius:12,padding:"18px 20px"}}>
-            <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:6}}>Portfolio value</div>
-            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:26,fontWeight:700,color:C.white,letterSpacing:-0.5}}>{sym}{fmt(totals.totalValue,0)}</div>
-            <div style={{fontSize:12,color:totals.pl>= 0 ?"#34D399":"#F87171",marginTop:4}}>{totals.pl>= 0 ?"^":"v"} {pct(totals.pctReturn)} overall</div>
-          </div>
-          <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:"18px 20px"}}>
-            <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:C.faint,marginBottom:6}}>Inception value</div>
-            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:26,fontWeight:700,color:C.navy,letterSpacing:-0.5}}>{sym}{fmt(totals.totalCost,0)}</div>
-            <div style={{fontSize:12,color:C.faint,marginTop:4}}>Cost basis</div>
-          </div>
-          <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:"18px 20px"}}>
-            <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:C.faint,marginBottom:6}}>Unrealised gain/loss</div>
-            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:26,fontWeight:700,color:posColor(totals.pl),letterSpacing:-0.5}}>{sign(totals.pl)}{sym}{fmt(Math.abs(totals.pl),0)}</div>
-            <div style={{fontSize:12,color:C.faint,marginTop:4}}>{pct(totals.pctReturn)} return</div>
-          </div>
-        </div>
-        <div style={{display:"flex",gap:0,borderBottom:"1px solid "+C.silver,marginBottom:18}}>
-          {[["portfolio","Portfolio"],["transactions","Transactions"]].map(([t,label])=>(
-            <button key={t} onClick={()=>setTab(t)} style={{background:"none",border:"none",borderBottom:tab===t?"2px solid "+C.teal:"2px solid transparent",color:tab===t?C.teal:C.faint,fontSize:13,fontWeight:tab===t?600:400,cursor:"pointer",padding:"9px 16px",marginBottom:-1,fontFamily:"'Inter',sans-serif"}}>
-              {label}
-            </button>
-          ))}
-        </div>
-        {tab==="portfolio"&&(
-          <div>
-            <div style={{background:C.navy,borderRadius:12,padding:"20px 22px",marginBottom:16}}>
-              <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:4}}>Portfolio value over time . {selectedCcy}</div>
-              <ResponsiveContainer width="100%" height={180}>
-                <AreaChart data={chartData}>
-                  <defs><linearGradient id="cgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.teal} stopOpacity={0.3}/><stop offset="95%" stopColor={C.teal} stopOpacity={0}/></linearGradient></defs>
-                  <XAxis dataKey="date" tick={{fontSize:10,fill:"rgba(255,255,255,0.35)"}}/>
-                  <YAxis tick={{fontSize:9,fill:"rgba(255,255,255,0.35)"}} tickFormatter={v=>sym+Math.round(v*0.001)+"k"}/>
-                  <Tooltip formatter={v=>[sym+fmt(v,0),"Value"]} contentStyle={{background:C.navyMid,border:"none",borderRadius:6,fontSize:12}} labelStyle={{color:C.white}}/>
-                  <Area type="monotone" dataKey="value" stroke={C.teal} strokeWidth={2} fill="url(#cgrad)" dot={{fill:C.teal,r:3}}/>
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-            <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden",marginBottom:16}}>
-              <div style={{padding:"14px 18px",borderBottom:"0.5px solid "+C.silver,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:15,fontWeight:600,color:C.navy}}>Holdings</div>
-                <div style={{display:"flex",gap:10,alignItems:"center"}}>
-                  <Badge color="info">{equityH.length} positions</Badge>
-                  <Badge color="navy">{cashH.length} cash</Badge>
-                </div>
-              </div>
-              <div style={{overflowX:"auto"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                  <thead>
-                    <tr style={{background:C.silver}}>
-                      {["Ticker","Description","CCY","Qty","Cost Value","Market Value","P&L","Return"].map(h=>(
-                        <th key={h} style={{padding:"9px 14px",textAlign:"left",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {holdings.map((h,i)=>{
-                      const cv = convertAmount(h.value, h.ccy, selectedCcy);
-                      const cc = convertAmount(h.cost, h.ccy, selectedCcy);
-                      const pl = cv - cc;
-                      const ret = calcPct(cc, cv);
-                      return(
-                        <tr key={i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2=== 0 ?C.white:"#FAFBFC"}}>
-                          <td style={{padding:"10px 14px",fontFamily:"Space Grotesk,sans-serif",fontWeight:700,color:C.navy}}>{h.ticker}</td>
-                          <td style={{padding:"10px 14px",color:C.text,maxWidth:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.name}</td>
-                          <td style={{padding:"10px 14px"}}><Badge color={h.ccy==="GBP"?"navy":"info"}>{h.ccy}</Badge></td>
-                          <td style={{padding:"10px 14px",textAlign:"right",color:C.text}}>{h.isCash?"--":fmt(h.qty,0)}</td>
-                          <td style={{padding:"10px 14px",textAlign:"right",color:C.text}}>{sym}{fmt(cc)}</td>
-                          <td style={{padding:"10px 14px",textAlign:"right",fontWeight:600,color:C.navy}}>{sym}{fmt(cv)}</td>
-                          <td style={{padding:"10px 14px",textAlign:"right",fontWeight:600,color:h.isCash?"#999":posColor(pl)}}>
-                            {h.isCash?"--":(sign(pl))+sym+fmt(Math.abs(pl))}
-                          </td>
-                          <td style={{padding:"10px 14px",textAlign:"right",color:h.isCash?"#999":posColor(ret)}}>
-                            {h.isCash?"--":pct(ret)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot>
-                    <tr style={{background:C.navy}}>
-                      <td colSpan={4} style={{padding:"10px 14px",color:C.white,fontWeight:600}}>Total</td>
-                      <td style={{padding:"10px 14px",textAlign:"right",color:"rgba(255,255,255,0.5)"}}>{sym}{fmt(totals.totalCost,0)}</td>
-                      <td style={{padding:"10px 14px",textAlign:"right",color:C.white,fontFamily:"Space Grotesk,sans-serif",fontWeight:700}}>{sym}{fmt(totals.totalValue,0)}</td>
-                      <td style={{padding:"10px 14px",textAlign:"right",color:totals.pl>= 0 ?"#34D399":"#F87171",fontWeight:600}}>
-                        {sign(totals.pl)}{sym}{fmt(Math.abs(totals.pl),0)}
-                      </td>
-                      <td style={{padding:"10px 14px",textAlign:"right",color:totals.pctReturn>= 0 ?"#34D399":"#F87171",fontWeight:600}}>
-                        {pct(totals.pctReturn)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </div>
-            <div style={{fontSize:11,color:C.faint,textAlign:"center",lineHeight:1.8}}>
-              Portfolio values are indicative and updated periodically. For queries contact your adviser.<br/>
-              i-Convergence Financial Platform . Data as of {new Date().toLocaleDateString("en-GB")}
-            </div>
-          </div>
-        )}
-        {tab==="transactions"&&(
-          <div>
-            <div style={{display:"flex",gap:8,marginBottom:12,flexWrap:"wrap"}}>
-              <input value={txSearch} onChange={e=>txSetSearch(e.target.value)} placeholder="Search transactions..." style={{flex:1,minWidth:150,padding:"7px 11px",border:"1.5px solid "+C.silver,borderRadius:6,fontSize:12,fontFamily:"'Inter',sans-serif",outline:"none"}}/>
-              <select onChange={e=>txSetFilter("txtype",e.target.value)} style={{padding:"7px 10px",border:"1.5px solid "+C.silver,borderRadius:6,fontSize:12,fontFamily:"'Inter',sans-serif",color:C.navy,background:C.white}}>
-                <option value="all">All types</option>
-                {txTypes.map(t=><option key={t} value={t}>{t}</option>)}
-              </select>
-              <span style={{fontSize:12,color:C.faint,display:"flex",alignItems:"center"}}>{txSorted.length} records</span>
-            </div>
-            <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden"}}>
-              <div style={{overflowX:"auto",maxHeight:520,overflowY:"auto"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                  <thead style={{position:"sticky",top:0,zIndex:5}}>
-                    <tr style={{background:C.navy}}>
-                      {[["tradedate","Date"],["txtype","Type"],["ticker","Ticker"],["description","Description"],["ccy","CCY"],["qty","Qty"],["consideration","Amount"],["netamt","Net"]].map(([col,label])=>(
-                        <th key={col} onClick={()=>txToggle(col)} style={{padding:"9px 12px",textAlign:"left",fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.6)",letterSpacing:0.8,textTransform:"uppercase",cursor:"pointer",whiteSpace:"nowrap",userSelect:"none",background:C.navy}}>
-                          {label}<SortIcon dir={txSort.col===col?txSort.dir:null}/>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {txSorted.slice(0,300).map((t,i)=>{
-                      const tc = t.txtype==="BUY"?"success":t.txtype==="SELL"?"error":t.txtype==="Dividend"?"gold":t.txtype.includes("Fee")||t.txtype==="SR Fee"?"warning":"info";
-                      return(
-                        <tr key={i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2=== 0 ?C.white:"#FAFBFC"}}>
-                          <td style={{padding:"8px 12px",color:C.text,whiteSpace:"nowrap"}}>{t.tradedate}</td>
-                          <td style={{padding:"8px 12px"}}><Badge color={tc}>{t.txtype}</Badge></td>
-                          <td style={{padding:"8px 12px",fontFamily:"Space Grotesk,sans-serif",fontWeight:600,color:C.navy}}>{t.ticker}</td>
-                          <td style={{padding:"8px 12px",color:C.text,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
-                          <td style={{padding:"8px 12px"}}><Badge color={t.ccy==="GBP"?"navy":"info"}>{t.ccy}</Badge></td>
-                          <td style={{padding:"8px 12px",textAlign:"right",color:C.text}}>{t.qty!== 0 ?fmt(Math.abs(t.qty),0):"--"}</td>
-                          <td style={{padding:"8px 12px",textAlign:"right",fontWeight:600,color:C.navy}}>{fmt(t.consideration)}</td>
-                          <td style={{padding:"8px 12px",textAlign:"right",color:posColor(t.netamt),fontWeight:500}}>{fmt(t.netamt)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              {txSorted.length>300&&(
-                <div style={{padding:"9px 14px",fontSize:11,color:C.faint,borderTop:"0.5px solid "+C.silver}}>
-                  Showing 300 of {txSorted.length} transactions -- use search or filters to narrow results
-                </div>
-              )}
-            </div>
-
-            <div style={{marginTop:16,fontSize:11,color:C.faint,textAlign:"center",lineHeight:1.8}}>
-              Transaction history is for reference only. For queries contact your adviser.<br/>
-              i-Convergence Financial Platform . Data as of {new Date().toLocaleDateString("en-GB")}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-
-// --- USER MANAGEMENT PAGE (adviser only) -------------------------------------
-const UserManagement = ({ user }) => {
-  const isMobile = useIsMobile();
-  const [users] = useState([
-    {id:"1",email:"james@iconvergence.co.uk",name:"James White",role:"adviser",lastLogin:"2024-06-01",status:"active"},
-    {id:"2",email:"sarah@iconvergence.co.uk",name:"Sarah Johnson",role:"adviser",lastLogin:"2024-05-30",status:"active"},
-    {id:"3",email:"Michael@i-FSC.com",name:"Michael Lightfoot",role:"client",clientId:"C00355633",lastLogin:"2024-05-28",status:"active"},
-    {id:"4",email:"Lyndsey@i-FSC.com",name:"Lyndsey Starkie",role:"client",clientId:"C00356735",lastLogin:"2024-05-15",status:"active"},
-    {id:"5",email:"Chris@i-FSC.com",name:"Chris Pauls",role:"client",clientId:"C00355634",lastLogin:"2024-04-20",status:"active"},
-    {id:"6",email:"Hash@i-FSC.com",name:"Hash Murji",role:"client",clientId:"C00347223",lastLogin:"2024-06-01",status:"active"},
-  ]);
-  const [showInvite,setShowInvite]=useState(false);
-  const [inviteEmail,setInviteEmail]=useState("");
-  const [inviteRole,setInviteRole]=useState("client");
-  const [inviteClientId,setInviteClientId]=useState("");
-  const [resetMsg,setResetMsg]=useState("");
-
-  const triggerReset = (email) => {
-    setResetMsg("Password reset email sent to "+email);
-    setTimeout(()=>setResetMsg(""),3000);
-  };
-
-  return(
-    <div style={{padding:isMobile?"12px 10px":24}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:20,flexWrap:"wrap",gap:12}}>
-        <div>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:3}}>Administration</div>
-          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:600,color:C.navy}}>User management</div>
-        </div>
-        <Btn onClick={()=>setShowInvite(true)}>+ Invite user</Btn>
-      </div>
-
-      {resetMsg&&<div style={{background:C.tealLight,border:"1px solid "+C.teal,borderRadius:8,padding:"10px 16px",marginBottom:16,fontSize:13,color:C.tealMid}}>{resetMsg}</div>}
-
-      <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,overflow:"hidden"}}>
-        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-          <thead><tr style={{background:C.navy}}>
-            {["User","Email","Role","Client ID","Last login","Status","Actions"].map(h=>(
-              <th key={h} style={{padding:"10px 14px",textAlign:"left",fontSize:10,fontWeight:600,color:"rgba(255,255,255,0.6)",letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
-            ))}
-          </tr></thead>
-          <tbody>
-            {users.map((u,i)=>(
-              <tr key={u.id} style={{borderBottom:"0.5px solid "+C.silver,background:i%2=== 0 ?C.white:"#FAFBFC"}}>
-                <td style={{padding:"11px 14px"}}>
-                  <div style={{display:"flex",gap:9,alignItems:"center"}}>
-                    <div style={{width:32,height:32,borderRadius:"50%",background:u.role==="adviser"?C.navy:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:12,fontWeight:700,flexShrink:0}}>
-                      {u.name.split(" ").map(n=>n[0]).join("")}
-                    </div>
-                    <span style={{fontWeight:600,color:C.navy}}>{u.name}</span>
-                  </div>
-                </td>
-                <td style={{padding:"11px 14px",color:C.text}}>{u.email}</td>
-                <td style={{padding:"11px 14px"}}><Badge color={u.role==="adviser"?"navy":"info"}>{u.role}</Badge></td>
-                <td style={{padding:"11px 14px",fontFamily:"monospace",fontSize:11,color:C.faint}}>{u.clientId||"--"}</td>
-                <td style={{padding:"11px 14px",color:C.faint}}>{u.lastLogin}</td>
-                <td style={{padding:"11px 14px"}}><Badge color="success">{u.status}</Badge></td>
-                <td style={{padding:"11px 14px"}}>
-                  <div style={{display:"flex",gap:6}}>
-                    <Btn small variant="ghost" onClick={()=>triggerReset(u.email)}>Reset pwd</Btn>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div style={{marginTop:16,background:C.silver,borderRadius:10,padding:"14px 18px",fontSize:12,color:C.text,lineHeight:1.8}}>
-        <strong style={{color:C.navy}}>To manage users in Auth0:</strong> Visit{" "}
-        <a href="https://manage.auth0.com" target="_blank" rel="noreferrer" style={{color:C.teal}}>manage.auth0.com</a>
-        {" "}&gt; User Management &gt; Users. Assign roles, reset passwords, enable/disable MFA, and view login history there.
-        Password resets above trigger an Auth0 email to the user.
-      </div>
-
-      {showInvite&&(
-        <Modal title="Invite user" onClose={()=>setShowInvite(false)}>
-          <FldInput label="Email address" value={inviteEmail} onChange={setInviteEmail} placeholder="user@example.com"/>
-          <FldSelect label="Role" value={inviteRole} onChange={setInviteRole} options={[{value:"adviser",label:"Adviser -- full platform access"},{value:"client",label:"Client -- portal access only"}]}/>
-          {inviteRole==="client"&&(
-            <FldSelect label="Link to client" value={inviteClientId} onChange={setInviteClientId} options={[{value:"",label:"Select client..."},...CLIENTS.map(c=>({value:c.id,label:c.name}))]}/>
-          )}
-          <div style={{background:C.silver,borderRadius:8,padding:"12px 14px",marginBottom:16,fontSize:12,color:C.text,lineHeight:1.7}}>
-            An invitation email will be sent. The user must set up MFA on first login. For client users, their portal will show only their linked portfolio.
-          </div>
-          <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
-            <Btn variant="secondary" onClick={()=>setShowInvite(false)}>Cancel</Btn>
-            <Btn onClick={()=>setShowInvite(false)}>Send invite</Btn>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-};
-
-
-// --- TRUSTEE DASHBOARD --------------------------------------------------------
-export default function App(){
-  const {user,loading,error,login,logout} = useAuth();
-  const [section,setSection]=useState("dashboard");
-  const [selectedClient,setSelectedClient]=useState(null);
-  const [selectedCcy,setSelectedCcy]=useState("USD");
-  const [previewClientId,setPreviewClientId]=useState(null);
-  const isMobile=useIsMobile();
 
   useEffect(()=>{
-    const style=document.createElement("style");
-    style.innerHTML=`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}@keyframes spin{to{transform:rotate(360deg)}}*{box-sizing:border-box;}body{overflow-x:hidden;margin:0;padding:0;}`;
-    style.id="iconv-global";
-    if(!document.getElementById("iconv-global")) document.head.appendChild(style);
-    return ()=>{ const el=document.getElementById("iconv-global"); if(el) el.remove(); };
-  },[]);
+    const style = document.createElement("style");
+    style.innerHTML = `*{box-sizing:border-box;}body{overflow-x:hidden;margin:0;padding:0;}@keyframes spin{to{transform:rotate(360deg)}}`;
+    style.id = "mn-global";
+    if (!document.getElementById("mn-global")) document.head.appendChild(style);
+    return () => { const el = document.getElementById("mn-global"); if(el) el.remove(); };
+  }, []);
 
-  const handleSection=(s)=>{setSection(s);if(s!=="clients")setSelectedClient(null);};
+  const handleSection = (s) => { setSection(s); if(s !== "clients") setSelectedClient(null); };
 
-  // Loading state
-  if(loading){
-    return(
-      <div style={{minHeight:"100vh",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center"}}>
-        <div style={{textAlign:"center"}}>
-          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:32,fontWeight:700,color:C.white,marginBottom:20}}><span style={{color:C.teal}}>i-</span>Convergence</div>
-          <div style={{width:32,height:32,border:"3px solid rgba(0,184,176,0.3)",borderTop:"3px solid "+C.teal,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto"}}/>
-        </div>
+  if (loading) return (
+    <div style={{minHeight:"100vh",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{textAlign:"center"}}>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:28,fontWeight:700,color:C.white,marginBottom:20}}><span style={{color:C.teal}}>i-</span>Convergence</div>
+        <div style={{width:32,height:32,border:"3px solid rgba(0,184,176,0.3)",borderTop:"3px solid "+C.teal,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto"}}/>
       </div>
-    );
-  }
+    </div>
+  );
 
-  // Not logged in
-  if(!user){
-    return <LoginScreen onLogin={login} loading={loading} error={error}/>;
-  }
+  if (!user) return <LoginScreen onLogin={login} loading={loading} error={error}/>;
 
-  // Client portal preview (adviser previewing a client view)
-  if(previewClientId){
-    return <ClientPortal user={user} logout={()=>setPreviewClientId(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} previewClientId={previewClientId}/>;
-  }
-
-  // Client role - show client portal only
-  if(user.isClient && !user.isAdviser){
-    return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy}/>;
-  }
-
-  // Adviser role - full platform
-  return(
+  return (
     <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       <Nav section={section} setSection={handleSection} selectedCcy={selectedCcy} setCcy={setSelectedCcy} user={user} logout={logout}/>
       <div style={{flex:1,overflowY:"auto",paddingBottom:isMobile?68:0}}>
-        {section==="dashboard"&&<Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy}/>}
-        {section==="clients"&&<ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClientId={setPreviewClientId}/>}
-        {section==="pricing"&&<Pricing selectedCcy={selectedCcy}/>}
-        {section==="risk"&&<RiskPage selectedCcy={selectedCcy} setSection={handleSection} setSelectedClient={setSelectedClient}/>}
-        {section==="withdrawals"&&<WithdrawalsPage/>}
-        {section==="connect"&&<Connect/>}
-        {section==="users"&&<UserManagement user={user}/>}
+        {section==="dashboard" && <Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy}/>}
+        {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy}/>}
+        {section==="withdrawals" && <WithdrawalsPage selectedCcy={selectedCcy}/>}
+        {section==="connect" && <Connect/>}
       </div>
     </div>
   );
