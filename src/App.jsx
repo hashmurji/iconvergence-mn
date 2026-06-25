@@ -493,7 +493,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy}) => {
 };
 
 // --- CLIENT DETAIL -----------------------------------------------------------
-const ClientDetail = ({clientId, onBack, selectedCcy}) => {
+const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient}) => {
   const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
   const [search, setSearch] = useState("");
@@ -520,9 +520,14 @@ const ClientDetail = ({clientId, onBack, selectedCcy}) => {
 
   return (
     <div style={{padding:isMobile?"10px 12px":24}}>
-      <button onClick={onBack} style={{background:"none",border:"none",color:C.teal,fontSize:13,cursor:"pointer",marginBottom:14,padding:0,display:"flex",alignItems:"center",gap:4,fontFamily:"'Inter',sans-serif"}}>
-        &larr; All clients
-      </button>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.teal,fontSize:13,cursor:"pointer",padding:0,display:"flex",alignItems:"center",gap:4,fontFamily:"'Inter',sans-serif"}}>
+          &larr; All clients
+        </button>
+        <button onClick={()=>setPreviewClient(clientId)} style={{background:C.teal,color:C.white,border:"none",borderRadius:6,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",gap:6}}>
+          ◉ View as client
+        </button>
+      </div>
 
       <div style={{background:C.navy,borderRadius:12,padding:isMobile?"14px":20,marginBottom:18,display:"flex",flexWrap:"wrap",gap:16,justifyContent:"space-between",alignItems:"center"}}>
         <div style={{display:"flex",alignItems:"center",gap:14}}>
@@ -768,13 +773,13 @@ const ClientDetail = ({clientId, onBack, selectedCcy}) => {
 };
 
 // --- CLIENTS LIST ------------------------------------------------------------
-const ClientsList = ({selectedClient, setSelectedClient, selectedCcy}) => {
+const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreviewClient}) => {
   const [search, setSearch] = useState("");
   const isMobile = useIsMobile();
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
 
   if (selectedClient) {
-    return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy}/>;
+    return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient}/>;
   }
 
   const filtered = CLIENTS.filter(c =>
@@ -952,12 +957,283 @@ const LoginScreen = ({onLogin, loading, error}) => (
   </div>
 );
 
+
+// --- CLIENT PORTAL ----------------------------------------------------------
+const ClientPortal = ({user, logout, selectedCcy, setCcy}) => {
+  const isMobile = useIsMobile();
+  const [tab, setTab] = useState("valuation");
+  const [search, setSearch] = useState("");
+  const [txFilter, setTxFilter] = useState("all");
+  const sym = CCY_SYMBOLS[selectedCcy] || "$";
+
+  // Find client by Auth0 clientId claim or default to first client for demo
+  const client = CLIENTS.find(c => c.id === user?.clientId) || CLIENTS[0];
+  const clientId = client?.id;
+  const val = VALUATIONS[clientId];
+  const holdings = HOLDINGS[clientId] || [];
+  const withdrawals = WITHDRAWALS[clientId] || [];
+  const distributions = DISTRIBUTIONS[clientId] || [];
+  const txns = TXNS.filter(t => t.clientId === clientId);
+
+  const filteredTxns = useMemo(() => {
+    let d = txns;
+    if (txFilter !== "all") d = d.filter(t => t.selector.toLowerCase() === txFilter || t.txtype.toLowerCase() === txFilter);
+    if (search) d = d.filter(t => [t.description, t.ticker, t.txtype].some(v => v && v.toLowerCase().includes(search.toLowerCase())));
+    return d;
+  }, [txns, txFilter, search]);
+
+  if (!client) return <div style={{padding:24,color:C.faint}}>No client account found.</div>;
+
+  const tabs = [["valuation","Valuation"],["holdings","Holdings"],["transactions","Transactions"],["withdrawals","Withdrawals"],["distribution","Distribution"]];
+
+  return (
+    <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
+      {/* Client Nav */}
+      <div style={{background:C.navy,display:"flex",alignItems:"center",padding:"0 16px",height:54,position:"sticky",top:0,zIndex:200,borderBottom:"1px solid rgba(0,184,176,0.15)"}}>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?16:20,fontWeight:700,color:C.white,marginRight:"auto"}}>
+          <span style={{color:C.teal}}>i-</span>Convergence
+        </div>
+        <CCYSelector selectedCcy={selectedCcy} onChange={setCcy}/>
+        <div style={{width:32,height:32,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:12,fontWeight:600,marginLeft:12,cursor:"pointer"}} title={user?.email}>
+          {client.name.split(" ").map(n=>n[0]).join("").slice(0,2)}
+        </div>
+        {!isMobile && <button onClick={logout} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",color:"rgba(255,255,255,0.6)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif",marginLeft:10}}>Sign out</button>}
+      </div>
+
+      <div style={{flex:1,padding:isMobile?"12px":24}}>
+        {/* Client Header */}
+        <div style={{background:C.navy,borderRadius:12,padding:isMobile?"14px":20,marginBottom:18,display:"flex",flexWrap:"wrap",gap:16,justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{display:"flex",alignItems:"center",gap:14}}>
+            <div style={{width:48,height:48,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:16,fontWeight:700,flexShrink:0}}>
+              {client.name.split(" ").map(n=>n[0]).join("")}
+            </div>
+            <div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{client.name}</div>
+              <div style={{fontSize:12,color:"rgba(255,255,255,0.5)"}}>{client.primaryCode} · {client.reportingCcy} · {client.jurisdiction}</div>
+            </div>
+          </div>
+          {val && (
+            <div style={{display:"flex",gap:isMobile?12:20,flexWrap:"wrap"}}>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Portfolio Value</div>
+                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{sym}{fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),0)}</div>
+              </div>
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Cash</div>
+                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.teal}}>{sym}{fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),0)}</div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Summary cards */}
+        {val && (
+          <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10,marginBottom:18}}>
+            {[
+              {label:"Total Valuation", value:sym+fmt(convertAmount(val.totalValuationNotice,"USD",selectedCcy),0), color:C.navy},
+              {label:"Asset Value", value:sym+fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),0), color:C.navy},
+              {label:"Cash Balance", value:sym+fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),0), color:C.green},
+              {label:"Liabilities", value:sym+fmt(convertAmount(val.totalLiabilities,"USD",selectedCcy),0), color:C.red},
+            ].map(card=>(
+              <div key={card.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"14px 16px"}}>
+                <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:C.faint,marginBottom:6}}>{card.label}</div>
+                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:18,fontWeight:700,color:card.color}}>{card.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Tabs */}
+        <div style={{borderBottom:"1.5px solid "+C.silver,marginBottom:20,display:"flex",overflowX:"auto",gap:0}}>
+          {tabs.map(([t,label])=>(
+            <button key={t} onClick={()=>setTab(t)} style={{background:"none",border:"none",borderBottom:tab===t?"2px solid "+C.teal:"2px solid transparent",color:tab===t?C.teal:C.faint,fontSize:13,fontWeight:tab===t?600:400,cursor:"pointer",padding:"9px 16px",marginBottom:-1,whiteSpace:"nowrap",fontFamily:"'Inter',sans-serif"}}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Valuation Tab */}
+        {tab==="valuation" && val && (
+          <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(2,1fr)",gap:12}}>
+            {[
+              {label:"Total Valuation Notice", value:sym+fmt(convertAmount(val.totalValuationNotice,"USD",selectedCcy),2)},
+              {label:"Total Brite Assets", value:sym+fmt(convertAmount(val.totalBriteAssets,"USD",selectedCcy),2)},
+              {label:"Total Asset Valuation", value:sym+fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),2)},
+              {label:"Total Cash Balance", value:sym+fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),2)},
+              {label:"Pension Valuation", value:sym+fmt(convertAmount(val.pensionValuation,"USD",selectedCcy),2)},
+              {label:"Pension Cash Balance", value:sym+fmt(convertAmount(val.pensionCash,"USD",selectedCcy),2)},
+              {label:"Direct Investment Cash", value:sym+fmt(convertAmount(val.directInvestmentCash,"USD",selectedCcy),2)},
+              {label:"Direct Investment Assets", value:sym+fmt(convertAmount(val.directInvestmentAssets,"USD",selectedCcy),2)},
+              {label:"Total Liabilities", value:sym+fmt(convertAmount(val.totalLiabilities,"USD",selectedCcy),2), red:true},
+              {label:"Surrender Rebate Payable", value:sym+fmt(convertAmount(val.surrenderRebatePayable,"USD",selectedCcy),2), red:true},
+            ].map(row=>(
+              <div key={row.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:13,color:C.faint}}>{row.label}</div>
+                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:600,color:row.red?C.red:C.navy}}>{row.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Holdings Tab */}
+        {tab==="holdings" && (
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:isMobile?600:700}}>
+              <thead>
+                <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+                  {["Holding","Account","Shares","Purchase Price","Market Value","Gain / Loss","% Change"].map(h=>(
+                    <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {holdings.map((h,i)=>(
+                  <tr key={i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2===0?C.white:"#FAFBFC"}}>
+                    <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>{h.name}</td>
+                    <td style={{padding:"10px 12px",color:C.faint,fontSize:11}}>{h.account}</td>
+                    <td style={{padding:"10px 12px",color:C.text}}>{h.shares.toLocaleString()}</td>
+                    <td style={{padding:"10px 12px",color:C.text}}>{h.purchasePrice}</td>
+                    <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>{h.marketValue}</td>
+                    <td style={{padding:"10px 12px",color:posColor(h.pctChange)}}>{h.gainLoss}</td>
+                    <td style={{padding:"10px 12px"}}>
+                      <span style={{background:posBg(h.pctChange),color:posColor(h.pctChange),fontSize:11,fontWeight:600,padding:"2px 7px",borderRadius:100}}>{pct(h.pctChange)}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Transactions Tab */}
+        {tab==="transactions" && (
+          <div>
+            <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+              <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search transactions..." style={{padding:"7px 12px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",flex:1,minWidth:160,color:C.navy}}/>
+              <select value={txFilter} onChange={e=>setTxFilter(e.target.value)} style={{padding:"7px 12px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",color:C.navy,background:C.white}}>
+                <option value="all">All types</option>
+                <option value="trade">Trades</option>
+                <option value="cashflow">Cashflows</option>
+                <option value="dividend">Dividends</option>
+              </select>
+              <div style={{fontSize:12,color:C.faint}}>{filteredTxns.length} records</div>
+            </div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:700}}>
+                <thead>
+                  <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+                    {["Date","Type","Ticker","Description","CCY","Consideration","Net Amount"].map(h=>(
+                      <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTxns.map(t=>(
+                    <tr key={t.id} style={{borderBottom:"0.5px solid "+C.silver}}>
+                      <td style={{padding:"8px 12px",color:C.faint,whiteSpace:"nowrap"}}>{t.tradedate}</td>
+                      <td style={{padding:"8px 12px"}}><Badge color={t.txtype==="BUY"?"success":t.txtype==="SELL"?"error":t.txtype==="Dividend"?"navy":"info"}>{t.txtype}</Badge></td>
+                      <td style={{padding:"8px 12px",fontWeight:600,color:C.navy}}>{t.ticker}</td>
+                      <td style={{padding:"8px 12px",color:C.text,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
+                      <td style={{padding:"8px 12px",color:C.faint}}>{t.ccy}</td>
+                      <td style={{padding:"8px 12px",color:C.navy,fontFamily:"monospace"}}>{t.consideration.toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                      <td style={{padding:"8px 12px",color:posColor(t.clientnetamt),fontFamily:"monospace"}}>{t.clientnetamt>=0?"+":""}{t.clientnetamt.toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Withdrawals Tab */}
+        {tab==="withdrawals" && (
+          <div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+              <thead>
+                <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+                  {["Date Requested","Type","Currency","Requested Amount","Actual Paid","Payment Date"].map(h=>(
+                    <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {withdrawals.length===0?(
+                  <tr><td colSpan={6} style={{padding:24,textAlign:"center",color:C.faint}}>No withdrawals recorded</td></tr>
+                ):withdrawals.map((w,i)=>(
+                  <tr key={i} style={{borderBottom:"0.5px solid "+C.silver}}>
+                    <td style={{padding:"10px 12px",color:C.text}}>{w.dateRequested}</td>
+                    <td style={{padding:"10px 12px"}}><Badge color="info">{w.type}</Badge></td>
+                    <td style={{padding:"10px 12px",color:C.faint}}>{w.currency}</td>
+                    <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>${fmt(w.requestedAmount,2)}</td>
+                    <td style={{padding:"10px 12px",fontWeight:600,color:C.green}}>${fmt(w.actualPaid,2)}</td>
+                    <td style={{padding:"10px 12px",color:C.text}}>{w.paymentDate}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {withdrawals.length>0&&(
+              <div style={{marginTop:14,background:C.silver,borderRadius:8,padding:"12px 16px",display:"flex",justifyContent:"space-between"}}>
+                <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Total paid</span>
+                <span style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>${fmt(withdrawals.reduce((s,w)=>s+w.actualPaid,0),2)}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Distribution Tab */}
+        {tab==="distribution" && (
+          <div>
+            {distributions.length===0?(
+              <div style={{padding:32,textAlign:"center",color:C.faint}}>
+                <div style={{fontSize:32,marginBottom:12}}>◇</div>
+                <div style={{fontSize:14,fontWeight:600,color:C.navy}}>No distributions</div>
+              </div>
+            ):distributions.map((dist,di)=>(
+              <div key={di} style={{marginBottom:24,background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:20}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:8}}>
+                  <div>
+                    <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>{dist.name}</div>
+                    <div style={{fontSize:12,color:C.faint}}>Date: {dist.date} · {dist.payments.length} payment{dist.payments.length!==1?"s":""}</div>
+                  </div>
+                  <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,color:C.navy}}>
+                    ${fmt(dist.payments.reduce((s,p)=>s+p.amount,0),2)}
+                  </div>
+                </div>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                  <thead>
+                    <tr style={{borderBottom:"1.5px solid "+C.silver}}>
+                      {["Account","Recipient","Date","Amount"].map(h=>(
+                        <th key={h} style={{textAlign:"left",padding:"6px 10px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase"}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dist.payments.map((p,i)=>(
+                      <tr key={i} style={{borderBottom:"0.5px solid "+C.silver}}>
+                        <td style={{padding:"10px 10px",fontFamily:"monospace",fontSize:12,color:C.faint}}>{p.accountNumber}</td>
+                        <td style={{padding:"10px 10px",color:C.text}}>{p.recipient}</td>
+                        <td style={{padding:"10px 10px",color:C.text}}>{p.date}</td>
+                        <td style={{padding:"10px 10px",fontWeight:600,color:C.navy,fontFamily:"Space Grotesk,sans-serif"}}>${fmt(p.amount,2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // --- APP ---------------------------------------------------------------------
 export default function App() {
   const {user, loading, error, login, logout} = useAuth();
   const [section, setSection] = useState("dashboard");
   const [selectedClient, setSelectedClient] = useState(null);
   const [selectedCcy, setSelectedCcy] = useState("USD");
+  const [previewClient, setPreviewClient] = useState(null);
   const isMobile = useIsMobile();
 
   useEffect(()=>{
@@ -981,12 +1257,18 @@ export default function App() {
 
   if (!user) return <LoginScreen onLogin={login} loading={loading} error={error}/>;
 
+  // Adviser previewing client view
+  if (previewClient) return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy}/>;
+
+  // Client role - show client portal only
+  if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy}/>;
+
   return (
     <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       <Nav section={section} setSection={handleSection} selectedCcy={selectedCcy} setCcy={setSelectedCcy} user={user} logout={logout}/>
       <div style={{flex:1,overflowY:"auto",paddingBottom:isMobile?68:0}}>
         {section==="dashboard" && <Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy}/>}
-        {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy}/>}
+        {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient}/>}
         {section==="withdrawals" && <WithdrawalsPage selectedCcy={selectedCcy}/>}
         {section==="connect" && <Connect/>}
       </div>
