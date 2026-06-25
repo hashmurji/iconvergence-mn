@@ -380,7 +380,7 @@ const Nav = ({section, setSection, selectedCcy, setCcy, user, logout}) => {
   return (
     <>
       <div style={{background:C.navy,display:"flex",alignItems:"center",padding:"0 16px",height:54,position:"sticky",top:0,zIndex:200,flexShrink:0,borderBottom:"1px solid rgba(0,184,176,0.15)"}}>
-        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?16:20,fontWeight:700,color:C.white,marginRight:isMobile?10:24,flexShrink:0}}>
+        <div onClick={()=>handleNav("dashboard")} style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?16:20,fontWeight:700,color:C.white,marginRight:isMobile?10:24,flexShrink:0,cursor:"pointer"}}>
           <span style={{color:C.teal}}>i-</span>Convergence
         </div>
         {!isMobile && items.filter(i=>i.key!=="users" || (user&&user.isAdviser)).map(i=>(
@@ -959,7 +959,7 @@ const LoginScreen = ({onLogin, loading, error}) => (
 
 
 // --- CLIENT PORTAL ----------------------------------------------------------
-const ClientPortal = ({user, logout, selectedCcy, setCcy}) => {
+const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview}) => {
   const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
   const [search, setSearch] = useState("");
@@ -990,14 +990,14 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy}) => {
     <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       {/* Client Nav */}
       <div style={{background:C.navy,display:"flex",alignItems:"center",padding:"0 16px",height:54,position:"sticky",top:0,zIndex:200,borderBottom:"1px solid rgba(0,184,176,0.15)"}}>
-        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?16:20,fontWeight:700,color:C.white,marginRight:"auto"}}>
+        <div onClick={()=>setTab("valuation")} style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?16:20,fontWeight:700,color:C.white,marginRight:"auto",cursor:"pointer"}}>
           <span style={{color:C.teal}}>i-</span>Convergence
         </div>
         <CCYSelector selectedCcy={selectedCcy} onChange={setCcy}/>
         <div style={{width:32,height:32,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:12,fontWeight:600,marginLeft:12,cursor:"pointer"}} title={user?.email}>
           {client.name.split(" ").map(n=>n[0]).join("").slice(0,2)}
         </div>
-        {!isMobile && <button onClick={logout} style={{background:"rgba(255,255,255,0.08)",border:"1px solid rgba(255,255,255,0.15)",color:"rgba(255,255,255,0.6)",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"'Inter',sans-serif",marginLeft:10}}>Sign out</button>}
+        <button onClick={logout} style={{background:isPreview?"rgba(0,184,176,0.2)":"rgba(255,255,255,0.08)",border:"1px solid "+(isPreview?"rgba(0,184,176,0.5)":"rgba(255,255,255,0.15)"),color:isPreview?C.teal:"rgba(255,255,255,0.6)",borderRadius:6,padding:"4px 10px",fontSize:isMobile?10:11,cursor:"pointer",fontFamily:"'Inter',sans-serif",marginLeft:isMobile?6:10}}>{isPreview?"Exit client view":"Sign out"}</button>
       </div>
 
       <div style={{flex:1,padding:isMobile?"12px":24}}>
@@ -1258,7 +1258,7 @@ export default function App() {
   if (!user) return <LoginScreen onLogin={login} loading={loading} error={error}/>;
 
   // Adviser previewing client view
-  if (previewClient) return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy}/>;
+  if (previewClient) return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} isPreview={true}/>;
 
   // Client role - show client portal only
   if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy}/>;
