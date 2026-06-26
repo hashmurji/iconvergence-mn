@@ -100,6 +100,39 @@ const useIsMobile = () => {
   return isMobile;
 };
 
+
+// --- ONEDRIVE DATA HOOK ------------------------------------------------------
+const useOneDriveData = () => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
+
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/onedrive");
+      if (!res.ok) throw new Error("API error: " + res.status);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      setData(json);
+      setLastUpdated(json.lastUpdated);
+    } catch (err) {
+      console.error("OneDrive fetch error:", err);
+      setError(err.message);
+      // Fall back to static data if API fails
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchData(); }, []);
+
+  return { data, loading, error, lastUpdated, refresh: fetchData };
+};
+
 // --- BRAND -------------------------------------------------------------------
 const C = {
   navy: "#0D1B2E", navyMid: "#162840", navyLight: "#1E3A5F",
@@ -329,18 +362,25 @@ const Nav = ({section, setSection, selectedCcy, setCcy, user, logout}) => {
 };
 
 // --- DASHBOARD ---------------------------------------------------------------
-const Dashboard = ({setSection, setSelectedClient, selectedCcy}) => {
+const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propClients, valuations: propValuations, lastUpdated, dataError, onRefresh}) => {
   const isMobile = useIsMobile();
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
-  const totalAUM = Object.values(VALUATIONS).reduce((s,v) => s + convertAmount(v.totalAssetValuation, "USD", selectedCcy), 0);
-  const totalCash = Object.values(VALUATIONS).reduce((s,v) => s + convertAmount(v.totalCashBalance, "USD", selectedCcy), 0);
-  const totalLiabilities = Object.values(VALUATIONS).reduce((s,v) => s + convertAmount(v.totalLiabilities, "USD", selectedCcy), 0);
+  const clients = propClients || CLIENTS;
+  const valuations = propValuations || VALUATIONS;
+  const totalAUM = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalAssetValuation, "USD", selectedCcy), 0);
+  const totalCash = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalCashBalance, "USD", selectedCcy), 0);
+  const totalLiabilities = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalLiabilities, "USD", selectedCcy), 0);
 
   return (
     <div style={{padding:isMobile?"14px 12px":24}}>
-      <div style={{marginBottom:18}}>
-        <div style={{fontSize:10,fontWeight:600,letterSpacing:3,textTransform:"uppercase",color:C.teal,marginBottom:3}}>Platform overview</div>
-        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?20:26,fontWeight:700,color:C.navy}}>Aggregate Dashboard</div>
+      <div style={{marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontSize:10,fontWeight:600,letterSpacing:3,textTransform:"uppercase",color:C.teal,marginBottom:3}}>Platform overview</div>
+          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?20:26,fontWeight:700,color:C.navy}}>Aggregate Dashboard</div>
+          {lastUpdated && <div style={{fontSize:11,color:C.faint,marginTop:3}}>Last synced: {new Date(lastUpdated).toLocaleString()}</div>}
+          {dataError && <div style={{fontSize:11,color:C.red,marginTop:3}}>Data error: {dataError} — showing cached data</div>}
+        </div>
+        {onRefresh && <button onClick={onRefresh} style={{background:C.teal,color:C.white,border:"none",borderRadius:6,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",gap:6}}>↻ Refresh data</button>}
       </div>
 
       <div style={{background:C.navy,borderRadius:12,padding:isMobile?"16px":24,marginBottom:14,display:"flex",flexWrap:"wrap",gap:16,justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -351,7 +391,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy}) => {
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           {[
-            {label:"Active clients", value:CLIENTS.length.toString()},
+            {label:"Active clients", value:clients.length.toString()},
             {label:"Cash balance", value:sym+fmt(totalCash,0)},
             {label:"Total liabilities", value:sym+fmt(totalLiabilities,0)},
             {label:"Verified", value:CLIENTS.filter(c=>c.verified).length+" of "+CLIENTS.length},
@@ -365,8 +405,8 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy}) => {
       </div>
 
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(280px,1fr))",gap:12,marginBottom:14}}>
-        {CLIENTS.map(c => {
-          const val = VALUATIONS[c.id];
+        {clients.map(c => {
+          const val = valuations[c.id];
           const aum = val ? convertAmount(val.totalAssetValuation, "USD", selectedCcy) : 0;
           const liab = val ? convertAmount(val.totalLiabilities, "USD", selectedCcy) : 0;
           const net = aum - liab;
@@ -399,19 +439,21 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy}) => {
 };
 
 // --- CLIENT DETAIL -----------------------------------------------------------
-const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient}) => {
+const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings: propHoldings, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, valuations: propValuations}) => {
   const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
   const [search, setSearch] = useState("");
   const [txFilter, setTxFilter] = useState("all");
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
 
-  const client = CLIENTS.find(c => c.id === clientId);
-  const val = VALUATIONS[clientId];
-  const holdings = HOLDINGS[clientId] || [];
-  const withdrawals = WITHDRAWALS[clientId] || [];
-  const distributions = DISTRIBUTIONS[clientId] || [];
-  const txns = TXNS.filter(t => t.clientId === clientId);
+  const allClients = CLIENTS;
+  const client = allClients.find(c => c.id === clientId);
+  const val = (propValuations || VALUATIONS)[clientId];
+  const holdings = (propHoldings || HOLDINGS)[clientId] || [];
+  const withdrawals = (propWithdrawals || WITHDRAWALS)[clientId] || [];
+  const distributions = (propDistributions || DISTRIBUTIONS)[clientId] || [];
+  const allTxns = propTxns || TXNS;
+  const txns = allTxns.filter(t => t.clientId === clientId);
 
   const filteredTxns = useMemo(() => {
     let d = txns;
@@ -683,16 +725,18 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient}) => {
 };
 
 // --- CLIENTS LIST ------------------------------------------------------------
-const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreviewClient}) => {
+const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreviewClient, clients: propClients, valuations: propValuations, holdings: propHoldings, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns}) => {
   const [search, setSearch] = useState("");
   const isMobile = useIsMobile();
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
+  const clients = propClients || CLIENTS;
+  const valuations = propValuations || VALUATIONS;
 
   if (selectedClient) {
-    return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient}/>;
+    return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} holdings={propHoldings} withdrawals={propWithdrawals} distributions={propDistributions} txns={propTxns} valuations={valuations}/>;
   }
 
-  const filtered = CLIENTS.filter(c =>
+  const filtered = clients.filter(c =>
     !search || [c.name, c.id, c.primaryCode, c.email].some(v => v && v.toLowerCase().includes(search.toLowerCase()))
   );
 
@@ -705,7 +749,7 @@ const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreview
       <div style={{display:"flex",gap:10,marginBottom:16}}>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name, ID or email..." style={{padding:"8px 12px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",flex:1,color:C.navy}}/>
       </div>
-      <div style={{fontSize:12,color:C.faint,marginBottom:12}}>{filtered.length} client{filtered.length!==1?"s":""}</div>
+      <div style={{fontSize:12,color:C.faint,marginBottom:12}}>{filtered.length} client{filtered.length!==1?"s":""} {clients.length > 1 ? "("+clients.length+" total)" : ""}</div>
       <div style={{overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
           <thead>
@@ -717,7 +761,7 @@ const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreview
           </thead>
           <tbody>
             {filtered.map(c=>{
-              const val = VALUATIONS[c.id];
+              const val = valuations[c.id];
               return (
                 <tr key={c.id} onClick={()=>setSelectedClient(c.id)} style={{borderBottom:"0.5px solid "+C.silver,cursor:"pointer",transition:"background 0.1s"}}
                   onMouseEnter={e=>e.currentTarget.style.background="#F8FAFB"}
@@ -751,10 +795,12 @@ const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreview
 };
 
 // --- WITHDRAWALS PAGE --------------------------------------------------------
-const WithdrawalsPage = ({selectedCcy}) => {
+const WithdrawalsPage = ({selectedCcy, withdrawals: propWithdrawals, clients: propClients}) => {
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
-  const allWithdrawals = Object.entries(WITHDRAWALS).flatMap(([clientId, wds]) =>
-    wds.map(w => ({ ...w, clientId, clientName: CLIENTS.find(c=>c.id===clientId)?.name || clientId }))
+  const withdrawalsData = propWithdrawals || WITHDRAWALS;
+  const clientsData = propClients || CLIENTS;
+  const allWithdrawals = Object.entries(withdrawalsData).flatMap(([clientId, wds]) =>
+    wds.map(w => ({ ...w, clientId, clientName: clientsData.find(c=>c.id===clientId)?.name || clientId }))
   );
   const total = allWithdrawals.reduce((s,w)=>s+convertAmount(w.actualPaid,"USD",selectedCcy),0);
 
@@ -1023,7 +1069,7 @@ const DocumentsTab = ({clientId, isAdviser}) => {
 };
 
 // --- CLIENT PORTAL ----------------------------------------------------------
-const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview}) => {
+const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: propHoldings, valuations: propValuations, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns}) => {
   const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
   const [search, setSearch] = useState("");
@@ -1033,11 +1079,12 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview}) => {
   // Find client by Auth0 clientId claim or default to first client for demo
   const client = CLIENTS.find(c => c.id === user?.clientId) || CLIENTS[0];
   const clientId = client?.id;
-  const val = VALUATIONS[clientId];
-  const holdings = HOLDINGS[clientId] || [];
-  const withdrawals = WITHDRAWALS[clientId] || [];
-  const distributions = DISTRIBUTIONS[clientId] || [];
-  const txns = TXNS.filter(t => t.clientId === clientId);
+  const val = (propValuations || VALUATIONS)[clientId];
+  const holdings = (propHoldings || HOLDINGS)[clientId] || [];
+  const withdrawals = (propWithdrawals || WITHDRAWALS)[clientId] || [];
+  const distributions = (propDistributions || DISTRIBUTIONS)[clientId] || [];
+  const allTxns = propTxns || TXNS;
+  const txns = allTxns.filter(t => t.clientId === clientId);
 
   const filteredTxns = useMemo(() => {
     let d = txns;
@@ -1293,12 +1340,23 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview}) => {
 
 // --- APP ---------------------------------------------------------------------
 export default function App() {
-  const {user, loading, error, login, logout} = useAuth();
+  const {user, loading: authLoading, error: authError, login, logout} = useAuth();
+  const {data: liveData, loading: dataLoading, error: dataError, lastUpdated, refresh} = useOneDriveData();
   const [section, setSection] = useState("dashboard");
   const [selectedClient, setSelectedClient] = useState(null);
   const [selectedCcy, setSelectedCcy] = useState("USD");
   const [previewClient, setPreviewClient] = useState(null);
   const isMobile = useIsMobile();
+
+  // Use live data if available, fall back to static
+  const clients = (liveData && liveData.clients && liveData.clients.length > 0) ? liveData.clients : CLIENTS;
+  const valuations = (liveData && liveData.valuations) ? liveData.valuations : VALUATIONS;
+  const holdings = (liveData && liveData.holdings) ? liveData.holdings : HOLDINGS;
+  const withdrawals = (liveData && liveData.withdrawals) ? liveData.withdrawals : WITHDRAWALS;
+  const distributions = (liveData && liveData.distributions) ? liveData.distributions : DISTRIBUTIONS;
+  const txns = (liveData && liveData.txns && liveData.txns.length > 0) ? liveData.txns : TXNS;
+  const loading = authLoading;
+  const error = authError;
 
   useEffect(()=>{
     const style = document.createElement("style");
@@ -1310,7 +1368,7 @@ export default function App() {
 
   const handleSection = (s) => { setSection(s); if(s !== "clients") setSelectedClient(null); };
 
-  if (loading) return (
+  if (loading || dataLoading) return (
     <div style={{minHeight:"100vh",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center"}}>
       <div style={{textAlign:"center"}}>
         <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:28,fontWeight:700,color:C.white,marginBottom:20}}><span style={{color:C.teal}}>i-</span>Convergence</div>
@@ -1322,18 +1380,18 @@ export default function App() {
   if (!user) return <LoginScreen onLogin={login} loading={loading} error={error}/>;
 
   // Adviser previewing client view
-  if (previewClient) return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} isPreview={true}/>;
+  if (previewClient) return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} isPreview={true} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns}/>;
 
   // Client role - show client portal only
-  if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy}/>;
+  if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns}/>;
 
   return (
     <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       <Nav section={section} setSection={handleSection} selectedCcy={selectedCcy} setCcy={setSelectedCcy} user={user} logout={logout}/>
       <div style={{flex:1,overflowY:"auto",paddingBottom:isMobile?68:0}}>
-        {section==="dashboard" && <Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy}/>}
-        {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient}/>}
-        {section==="withdrawals" && <WithdrawalsPage selectedCcy={selectedCcy}/>}
+        {section==="dashboard" && <Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} clients={clients} valuations={valuations} lastUpdated={lastUpdated} dataError={dataError} onRefresh={refresh}/>}
+        {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} clients={clients} valuations={valuations} holdings={holdings} withdrawals={withdrawals} distributions={distributions} txns={txns}/>}
+        {section==="withdrawals" && <WithdrawalsPage selectedCcy={selectedCcy} withdrawals={withdrawals} clients={clients}/>}
         {section==="connect" && <Connect/>}
       </div>
     </div>
