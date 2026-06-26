@@ -1340,12 +1340,12 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
             ))}
           </div>
         )}
-      </div>
 
         {/* Documents Tab */}
         {tab==="documents" && (
           <DocumentsTab clientId={clientId} isAdviser={false} liveDocuments={liveDocuments}/>
         )}
+      </div>
     </div>
   );
 };
