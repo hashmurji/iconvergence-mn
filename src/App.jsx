@@ -926,6 +926,8 @@ const DocumentsTab = ({clientId, isAdviser, liveDocuments}) => {
   ];
   const filtered = catFilter === "All" ? allDocs : allDocs.filter(d => d.category === catFilter);
 
+  if (!clientId) return null;
+
   const handleUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -954,7 +956,7 @@ const DocumentsTab = ({clientId, isAdviser, liveDocuments}) => {
   };
 
   return (
-    <div>
+    <div style={{width:"100%"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {DOC_CATEGORIES.map(cat=>(
