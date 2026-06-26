@@ -242,16 +242,7 @@ const TXNS = [{"id":0,"selector":"Cashflow","tradedate":"27/07/2023","settdate":
 
 
 // --- DOCUMENTS --------------------------------------------------------------
-const DOCUMENTS = {
-  "C00007630": [
-    { id: "d1", name: "Portfolio Valuation Report Q4 2024.pdf", category: "Valuation", date: "2025-01-15", size: "1.2 MB", uploadedBy: "Adviser" },
-    { id: "d2", name: "1st Interim Distribution Notice.pdf", category: "Distribution", date: "2025-12-16", size: "845 KB", uploadedBy: "Adviser" },
-    { id: "d3", name: "Annual Statement 2024.pdf", category: "Statement", date: "2025-02-01", size: "2.4 MB", uploadedBy: "Adviser" },
-    { id: "d4", name: "Investment Policy Statement.pdf", category: "Agreement", date: "2023-06-01", size: "560 KB", uploadedBy: "Adviser" },
-    { id: "d5", name: "Withdrawal Confirmation Feb 2024.pdf", category: "Withdrawal", date: "2024-02-16", size: "320 KB", uploadedBy: "Adviser" },
-    { id: "d6", name: "Withdrawal Confirmation Dec 2024.pdf", category: "Withdrawal", date: "2024-12-07", size: "318 KB", uploadedBy: "Adviser" },
-  ],
-};
+const DOCUMENTS = {};
 
 const DOC_CATEGORIES = ["All", "Valuation", "Distribution", "Statement", "Agreement", "Withdrawal"];
 
@@ -1082,7 +1073,7 @@ const DocumentsTab = ({clientId, isAdviser, liveDocuments}) => {
 };
 
 // --- CLIENT PORTAL ----------------------------------------------------------
-const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: propHoldings, valuations: propValuations, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, liveDocuments}) => {
+const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: propHoldings, valuations: propValuations, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, liveDocuments, clients: propClients, previewClientObj}) => {
   const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
   const [search, setSearch] = useState("");
@@ -1090,7 +1081,8 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
 
   // Find client by Auth0 clientId claim or default to first client for demo
-  const client = CLIENTS.find(c => c.id === user?.clientId) || CLIENTS[0];
+  const clientsSource = propClients || CLIENTS;
+  const client = previewClientObj || clientsSource.find(c => c.id === user?.clientId) || clientsSource[0];
   const clientId = client?.id;
   const val = (propValuations || VALUATIONS)[clientId];
   const holdings = (propHoldings || HOLDINGS)[clientId] || [];
@@ -1394,10 +1386,10 @@ export default function App() {
   if (!user) return <LoginScreen onLogin={login} loading={loading} error={error}/>;
 
   // Adviser previewing client view
-  if (previewClient) return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} isPreview={true} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>;
+  if (previewClient) { const previewClientObj = clients.find(c=>c.id===previewClient); return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} isPreview={true} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments} clients={clients} previewClientObj={previewClientObj}/>; }
 
   // Client role - show client portal only
-  if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>;
+  if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments} clients={clients}/>;
 
   return (
     <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
