@@ -439,7 +439,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
 };
 
 // --- CLIENT DETAIL -----------------------------------------------------------
-const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings: propHoldings, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, valuations: propValuations, clients: propClients}) => {
+const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings: propHoldings, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, valuations: propValuations, clients: propClients, liveDocuments}) => {
   const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
   const [search, setSearch] = useState("");
@@ -680,7 +680,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
       )}
 
       {tab==="documents" && (
-        <DocumentsTab clientId={clientId} isAdviser={true}/>
+        <DocumentsTab clientId={clientId} isAdviser={true} liveDocuments={liveDocuments}/>
       )}
 
       {tab==="crm" && (
@@ -725,7 +725,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
 };
 
 // --- CLIENTS LIST ------------------------------------------------------------
-const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreviewClient, clients: propClients, valuations: propValuations, holdings: propHoldings, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns}) => {
+const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreviewClient, clients: propClients, valuations: propValuations, holdings: propHoldings, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, liveDocuments}) => {
   const [search, setSearch] = useState("");
   const isMobile = useIsMobile();
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
@@ -733,7 +733,7 @@ const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreview
   const valuations = propValuations || VALUATIONS;
 
   if (selectedClient) {
-    return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} holdings={propHoldings} withdrawals={propWithdrawals} distributions={propDistributions} txns={propTxns} valuations={valuations} clients={clients}/>;
+    return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} holdings={propHoldings} withdrawals={propWithdrawals} distributions={propDistributions} txns={propTxns} valuations={valuations} clients={clients} liveDocuments={liveDocuments}/>;
   }
 
   const filtered = clients.filter(c =>
@@ -916,16 +916,24 @@ const LoginScreen = ({onLogin, loading, error}) => (
 
 
 // --- DOCUMENTS TAB ----------------------------------------------------------
-const DocumentsTab = ({clientId, isAdviser}) => {
+const DocumentsTab = ({clientId, isAdviser, liveDocuments}) => {
   const [catFilter, setCatFilter] = useState("All");
   const [uploading, setUploading] = useState(false);
   const [uploadName, setUploadName] = useState("");
   const [uploadCat, setUploadCat] = useState("Statement");
-  const [docs, setDocs] = useState(DOCUMENTS[clientId] || []);
+  const [extraDocs, setExtraDocs] = useState([]);
   const [showUpload, setShowUpload] = useState(false);
   const fileRef = React.useRef(null);
 
-  const filtered = catFilter === "All" ? docs : docs.filter(d => d.category === catFilter);
+  // Combine live zip with any static/uploaded docs
+  const liveZip = liveDocuments && liveDocuments[clientId];
+  const baseDocs = DOCUMENTS[clientId] || [];
+  const allDocs = [
+    ...(liveZip ? [{ id:"live-zip", name: liveZip.name, category:"Documents", date: liveZip.modified, size: liveZip.size, uploadedBy:"OneDrive", downloadUrl: liveZip.downloadUrl, isLive: true }] : []),
+    ...baseDocs,
+    ...extraDocs,
+  ];
+  const filtered = catFilter === "All" ? allDocs : allDocs.filter(d => d.category === catFilter);
 
   const handleUpload = (e) => {
     const file = e.target.files[0];
@@ -943,7 +951,7 @@ const DocumentsTab = ({clientId, isAdviser}) => {
       size: "—",
       uploadedBy: "Adviser",
     };
-    setDocs(prev => [newDoc, ...prev]);
+    setExtraDocs(prev => [newDoc, ...prev]);
     setUploadName("");
     setShowUpload(false);
     setUploading(false);
@@ -1032,11 +1040,16 @@ const DocumentsTab = ({clientId, isAdviser}) => {
                 <Badge color={catColor(doc.category)}>{doc.category}</Badge>
                 <button
                   onClick={()=>{
-                    const blob = new Blob(["Document: "+doc.name], {type:"application/pdf"});
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement("a");
-                    a.href=url; a.download=doc.name; a.click();
-                    URL.revokeObjectURL(url);
+                    if (doc.downloadUrl) {
+                      const a = document.createElement("a");
+                      a.href=doc.downloadUrl; a.download=doc.name; a.click();
+                    } else {
+                      const blob = new Blob(["Document: "+doc.name], {type:"application/octet-stream"});
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href=url; a.download=doc.name; a.click();
+                      URL.revokeObjectURL(url);
+                    }
                   }}
                   style={{background:C.teal,color:C.white,border:"none",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap"}}>
                   Download
@@ -1049,10 +1062,10 @@ const DocumentsTab = ({clientId, isAdviser}) => {
 
       {isAdviser && docs.length > 0 && (
         <div style={{marginTop:16,padding:"12px 16px",background:C.silver,borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <span style={{fontSize:13,color:C.faint}}>{docs.length} documents in vault</span>
+          <span style={{fontSize:13,color:C.faint}}>{allDocs.length} document{allDocs.length!==1?"s":""} in vault</span>
           <button
             onClick={()=>{
-              const content = docs.map(d=>d.name).join("\n");
+              const content = allDocs.map(d=>d.name).join("\n");
               const blob = new Blob([content], {type:"text/plain"});
               const url = URL.createObjectURL(blob);
               const a = document.createElement("a");
@@ -1069,7 +1082,7 @@ const DocumentsTab = ({clientId, isAdviser}) => {
 };
 
 // --- CLIENT PORTAL ----------------------------------------------------------
-const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: propHoldings, valuations: propValuations, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns}) => {
+const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: propHoldings, valuations: propValuations, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, liveDocuments}) => {
   const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
   const [search, setSearch] = useState("");
@@ -1355,6 +1368,7 @@ export default function App() {
   const withdrawals = (liveData && liveData.withdrawals) ? liveData.withdrawals : WITHDRAWALS;
   const distributions = (liveData && liveData.distributions) ? liveData.distributions : DISTRIBUTIONS;
   const txns = (liveData && liveData.txns && liveData.txns.length > 0) ? liveData.txns : TXNS;
+  const liveDocuments = (liveData && liveData.documents) ? liveData.documents : {};
   const loading = authLoading;
   const error = authError;
 
@@ -1380,17 +1394,17 @@ export default function App() {
   if (!user) return <LoginScreen onLogin={login} loading={loading} error={error}/>;
 
   // Adviser previewing client view
-  if (previewClient) return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} isPreview={true} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns}/>;
+  if (previewClient) return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} isPreview={true} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>;
 
   // Client role - show client portal only
-  if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns}/>;
+  if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>;
 
   return (
     <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       <Nav section={section} setSection={handleSection} selectedCcy={selectedCcy} setCcy={setSelectedCcy} user={user} logout={logout}/>
       <div style={{flex:1,overflowY:"auto",paddingBottom:isMobile?68:0}}>
         {section==="dashboard" && <Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} clients={clients} valuations={valuations} lastUpdated={lastUpdated} dataError={dataError} onRefresh={refresh}/>}
-        {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} clients={clients} valuations={valuations} holdings={holdings} withdrawals={withdrawals} distributions={distributions} txns={txns}/>}
+        {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} clients={clients} valuations={valuations} holdings={holdings} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>}
         {section==="withdrawals" && <WithdrawalsPage selectedCcy={selectedCcy} withdrawals={withdrawals} clients={clients}/>}
         {section==="connect" && <Connect/>}
       </div>

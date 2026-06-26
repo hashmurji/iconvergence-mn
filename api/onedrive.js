@@ -260,6 +260,29 @@ export default async function handler(req, res) {
     const withdrawals = buildWithdrawals(sheets["Processed Withdrawals"] || []);
     const distributions = buildDistributions(sheets["Distribution"] || []);
 
+    // Find document zips for each client
+    const documents = {};
+    for (const client of clients) {
+      try {
+        const zipName = `${client.id}.zip`;
+        const zipCheckUrl = `https://graph.microsoft.com/v1.0/sites/${SITE_ID}/drives/${DRIVE_ID}/root:/${FOLDER_PATH}/${zipName}`;
+        const zipRes = await fetch(zipCheckUrl, { headers: { Authorization: `Bearer ${token}` } });
+        if (zipRes.ok) {
+          const zipData = await zipRes.json();
+          if (zipData.id) {
+            documents[client.id] = {
+              name: zipName,
+              size: zipData.size ? Math.round(zipData.size / 1024) + " KB" : "—",
+              modified: zipData.lastModifiedDateTime ? zipData.lastModifiedDateTime.slice(0, 10) : "—",
+              downloadUrl: zipData["@microsoft.graph.downloadUrl"] || null,
+            };
+          }
+        }
+      } catch(e) {
+        // No zip found for this client, skip
+      }
+    }
+
     return res.status(200).json({
       clients,
       valuations,
@@ -267,6 +290,7 @@ export default async function handler(req, res) {
       withdrawals,
       distributions,
       txns,
+      documents,
       lastUpdated: new Date().toISOString(),
     });
   } catch (err) {
