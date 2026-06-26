@@ -439,15 +439,15 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
 };
 
 // --- CLIENT DETAIL -----------------------------------------------------------
-const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings: propHoldings, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, valuations: propValuations}) => {
+const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings: propHoldings, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, valuations: propValuations, clients: propClients}) => {
   const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
   const [search, setSearch] = useState("");
   const [txFilter, setTxFilter] = useState("all");
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
 
-  const allClients = CLIENTS;
-  const client = allClients.find(c => c.id === clientId);
+  const clientsSource = propClients || CLIENTS;
+  const client = clientsSource.find(c => c.id === clientId);
   const val = (propValuations || VALUATIONS)[clientId];
   const holdings = (propHoldings || HOLDINGS)[clientId] || [];
   const withdrawals = (propWithdrawals || WITHDRAWALS)[clientId] || [];
@@ -733,7 +733,7 @@ const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreview
   const valuations = propValuations || VALUATIONS;
 
   if (selectedClient) {
-    return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} holdings={propHoldings} withdrawals={propWithdrawals} distributions={propDistributions} txns={propTxns} valuations={valuations}/>;
+    return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} holdings={propHoldings} withdrawals={propWithdrawals} distributions={propDistributions} txns={propTxns} valuations={valuations} clients={clients}/>;
   }
 
   const filtered = clients.filter(c =>
