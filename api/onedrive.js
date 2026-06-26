@@ -8,7 +8,9 @@ const CLIENT_SECRET = process.env.AZURE_CLIENT_SECRET;
 // SharePoint site details
 const SHAREPOINT_HOST = "recit365-my.sharepoint.com";
 const SITE_PATH = "/personal/harshad_iconvergence_co_uk";
-const FOLDER_PATH = "Documents/iconvergence-mn";
+const SITE_ID = "recit365-my.sharepoint.com,fecf4208-aba4-4152-8740-f4b93c99d92b,c2c93cb5-c5e7-4453-b8de-6a8d56b63267";
+const DRIVE_ID = "b!CELP_qSrUkGHQPS5PJnZK7U8ycLnxVNEuN5qjVa2MmcYWMolKah8T6PSxMz8xJJF";
+const FOLDER_PATH = "iconvergence-mn";
 
 // File names
 const EXCEL_FILE = "clients_holdings_valuations_loans_withdrawals.xlsx";
@@ -235,8 +237,8 @@ export default async function handler(req, res) {
 
   try {
     const token = await getAccessToken();
-    const siteId = await getSiteId(token);
-    const driveId = await getDriveId(token, siteId);
+    const siteId = SITE_ID;
+    const driveId = DRIVE_ID;
 
     // Fetch both files in parallel
     const [excelRes, csvRes] = await Promise.all([
