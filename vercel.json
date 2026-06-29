@@ -3,7 +3,21 @@
   "buildCommand": "cd /vercel/path0 && npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
-    { "source": "/(.*)", "destination": "/index.html" }
-  ]
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "functions": {
+    "api/onedrive.js": {
+      "maxDuration": 60
+    },
+    "api/auth0users.js": {
+      "maxDuration": 30
+    }
+  }
 }
