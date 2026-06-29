@@ -102,18 +102,6 @@ const useIsMobile = () => {
 
 
 // --- ONEDRIVE DATA HOOK ------------------------------------------------------
-const C = {
-  navy: "#0D1B2E", navyMid: "#162840", navyLight: "#1E3A5F",
-  teal: "#00B8B0", tealLight: "#E6F9F8",
-  silver: "#EFF2F6", silverMid: "#C4CDD8",
-  white: "#FFFFFF", text: "#2D3748", faint: "#8A9AB0",
-  green: "#10B981", greenBg: "#D1FAE5",
-  red: "#EF4444", redBg: "#FEE2E2",
-  amber: "#F59E0B", amberBg: "#FEF3C7",
-  gold: "#F5A623", goldLight: "#FEF5E7",
-};
-
-
 const useOneDriveData = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -146,24 +134,18 @@ const useOneDriveData = () => {
   return { data, loading, error, lastUpdated, refresh: fetchData };
 };
 
-// --- CLIENT DETAIL HOOK -----------------------------------------------------
-const useClientDetailData = (clientId) => {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  useEffect(() => {
-    if (!clientId) { setData(null); return; }
-    setLoading(true);
-    setData(null);
-    fetch("/api/onedrive")
-      .then(r => r.json())
-      .then(json => { if (!json.error) setData(json); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [clientId]);
-  return { data, loading };
+// --- BRAND -------------------------------------------------------------------
+const C = {
+  navy: "#0D1B2E", navyMid: "#162840", navyLight: "#1E3A5F",
+  teal: "#00B8B0", tealLight: "#E6F9F8",
+  silver: "#EFF2F6", silverMid: "#C4CDD8",
+  white: "#FFFFFF", text: "#2D3748", faint: "#8A9AB0",
+  green: "#10B981", greenBg: "#D1FAE5",
+  red: "#EF4444", redBg: "#FEE2E2",
+  amber: "#F59E0B", amberBg: "#FEF3C7",
+  gold: "#F5A623", goldLight: "#FEF5E7",
 };
 
-// --- BRAND -------------------------------------------------------------------
 // --- FX (static for now - will be updated manually) -------------------------
 const FX = { USDAUD: 1.501186, AUDUSD: 0.6661, USDEUR: 0.91954, EURUSD: 1.0875, USDGBP: 0.792519, GBPUSD: 1.2619, AUDEUR: 0.6128, EURAUD: 1.6318, AUDGBP: 0.5279, GBPAUD: 1.8944, EURGBP: 0.8620, GBPEUR: 1.1600 };
 const CCY_SYMBOLS = { USD: "$", GBP: "£", EUR: "€", AUD: "A$" };
@@ -477,53 +459,330 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
         </div>
       </div>
 
-      <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden",marginBottom:14}}>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(280px,1fr))",gap:12,marginBottom:14}}>
+        {clients.map(c => {
+          const val = valuations[c.id];
+          const aum = val ? convertAmount(val.totalAssetValuation, "USD", selectedCcy) : 0;
+          const liab = val ? convertAmount(val.totalLiabilities, "USD", selectedCcy) : 0;
+          const net = aum - liab;
+          return (
+            <div key={c.id} onClick={()=>{setSelectedClient(c.id);setSection("clients");}}
+              style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:18,cursor:"pointer",transition:"border-color 0.15s",boxShadow:"0 2px 8px rgba(0,0,0,0.05)"}}
+              onMouseEnter={e=>e.currentTarget.style.borderColor=C.teal}
+              onMouseLeave={e=>e.currentTarget.style.borderColor=C.silver}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:38,height:38,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:13,fontWeight:700}}>
+                    {c.name.split(" ").map(n=>n[0]).join("")}
+                  </div>
+                  <div>
+                    <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.navy}}>{c.name}</div>
+                    <div style={{fontSize:10,color:C.faint}}>{c.primaryCode}</div>
+                  </div>
+                </div>
+                <Badge color={c.verified?"success":"warning"}>{c.verified?"Verified":"Pending"}</Badge>
+              </div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,color:C.navy,letterSpacing:-0.5,marginBottom:4}}>{sym}{fmt(aum,0)}</div>
+              <div style={{fontSize:12,color:C.faint}}>Net: {sym}{fmt(net,0)} after liabilities</div>
+              <div style={{marginTop:10,fontSize:11,color:C.teal,fontWeight:600}}>View portfolio &rarr;</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+// --- CLIENT DETAIL -----------------------------------------------------------
+const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings: propHoldings, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, valuations: propValuations, clients: propClients, liveDocuments}) => {
+  const [detailData, setDetailData] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  useEffect(() => {
+    if (!clientId) return;
+    setDetailLoading(true); setDetailData(null);
+    fetch("/api/onedrive").then(r=>r.json()).then(d=>{ if(!d.error) setDetailData(d); }).catch(()=>{}).finally(()=>setDetailLoading(false));
+  }, [clientId]);
+    const isMobile = useIsMobile();
+  const [tab, setTab] = useState("valuation");
+  const [search, setSearch] = useState("");
+  const [txFilter, setTxFilter] = useState("all");
+  const sym = CCY_SYMBOLS[selectedCcy] || "$";
+
+  const clientsSource = propClients || CLIENTS;
+  const client = clientsSource.find(c => c.id === clientId);
+  const val = (propValuations || VALUATIONS)[clientId];
+  const holdings = (detailData&&detailData.holdings) ? detailData.holdings[clientId]||[] : (propHoldings||HOLDINGS)[clientId]||[];
+  const withdrawals = (detailData&&detailData.withdrawals) ? detailData.withdrawals[clientId]||[] : (propWithdrawals||WITHDRAWALS)[clientId]||[];
+  const distributions = (detailData&&detailData.distributions) ? detailData.distributions[clientId]||[] : (propDistributions||DISTRIBUTIONS)[clientId]||[];
+  const allTxns = (detailData&&detailData.txns&&detailData.txns.length>0) ? detailData.txns : (propTxns||TXNS);
+  const txns = allTxns.filter(t => t.clientId === clientId);
+
+  const filteredTxns = useMemo(() => {
+    let d = txns;
+    if (txFilter !== "all") d = d.filter(t => t.selector.toLowerCase() === txFilter || t.txtype.toLowerCase() === txFilter);
+    if (search) d = d.filter(t => [t.description, t.ticker, t.txtype].some(v => v && v.toLowerCase().includes(search.toLowerCase())));
+    return d;
+  }, [txns, txFilter, search]);
+
+  if (detailLoading) return (<div style={{padding:32,display:"flex",alignItems:"center",gap:12}}><div style={{width:24,height:24,border:"3px solid rgba(0,184,176,0.3)",borderTop:"3px solid #00B8B0",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/><span style={{color:C.faint,fontSize:14}}>Loading client data...</span></div>);
+  if (!client) return <div style={{padding:24}}>Client not found</div>;
+
+  const tabs = [["valuation","Valuation"],["holdings","Holdings"],["transactions","Transactions"],["withdrawals","Withdrawals"],["distribution","Distribution"],["documents","Documents"],["crm","CRM"]];
+
+  return (
+    <div style={{padding:isMobile?"10px 12px":24}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:C.teal,fontSize:13,cursor:"pointer",padding:0,display:"flex",alignItems:"center",gap:4,fontFamily:"'Inter',sans-serif"}}>
+          &larr; All clients
+        </button>
+        <button onClick={()=>setPreviewClient(clientId)} style={{background:C.teal,color:C.white,border:"none",borderRadius:6,padding:"6px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",gap:6}}>
+          ◉ View as client
+        </button>
+      </div>
+
+      <div style={{background:C.navy,borderRadius:12,padding:isMobile?"14px":20,marginBottom:18,display:"flex",flexWrap:"wrap",gap:16,justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{display:"flex",alignItems:"center",gap:14}}>
+          <div style={{width:48,height:48,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:16,fontWeight:700,flexShrink:0}}>
+            {client.name.split(" ").map(n=>n[0]).join("")}
+          </div>
+          <div>
+            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{client.name}</div>
+            <div style={{fontSize:12,color:"rgba(255,255,255,0.5)"}}>{client.primaryCode} · {client.reportingCcy} · {client.jurisdiction}</div>
+          </div>
+        </div>
+        {val && (
+          <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Asset Valuation</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.white}}>{sym}{fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),0)}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Cash</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.teal}}>{sym}{fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),0)}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Liabilities</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.red}}>{sym}{fmt(convertAmount(val.totalLiabilities,"USD",selectedCcy),0)}</div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div style={{borderBottom:"1.5px solid "+C.silver,marginBottom:20,display:"flex",overflowX:"auto",gap:0}}>
+        {tabs.map(([t,label])=>(
+          <button key={t} onClick={()=>setTab(t)} style={{background:"none",border:"none",borderBottom:tab===t?"2px solid "+C.teal:"2px solid transparent",color:tab===t?C.teal:C.faint,fontSize:13,fontWeight:tab===t?600:400,cursor:"pointer",padding:"9px 16px",marginBottom:-1,whiteSpace:"nowrap",fontFamily:"'Inter',sans-serif"}}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab==="valuation" && val && (
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(2,1fr)",gap:12}}>
+          {[
+            {label:"Total Valuation Notice", value:sym+fmt(convertAmount(val.totalValuationNotice,"USD",selectedCcy),2)},
+            {label:"Total Brite Assets", value:sym+fmt(convertAmount(val.totalBriteAssets,"USD",selectedCcy),2)},
+            {label:"Total Asset Valuation", value:sym+fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),2)},
+            {label:"Total Cash Balance", value:sym+fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),2)},
+            {label:"Pension Valuation", value:sym+fmt(convertAmount(val.pensionValuation,"USD",selectedCcy),2)},
+            {label:"Pension Cash Balance", value:sym+fmt(convertAmount(val.pensionCash,"USD",selectedCcy),2)},
+            {label:"Direct Investment Cash", value:sym+fmt(convertAmount(val.directInvestmentCash,"USD",selectedCcy),2)},
+            {label:"Direct Investment Assets", value:sym+fmt(convertAmount(val.directInvestmentAssets,"USD",selectedCcy),2)},
+            {label:"Total Liabilities", value:sym+fmt(convertAmount(val.totalLiabilities,"USD",selectedCcy),2), red:true},
+            {label:"Surrender Rebate Payable", value:sym+fmt(convertAmount(val.surrenderRebatePayable,"USD",selectedCcy),2), red:true},
+          ].map(row=>(
+            <div key={row.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:13,color:C.faint}}>{row.label}</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:600,color:row.red?C.red:C.navy}}>{row.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab==="holdings" && (
         <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:700}}>
             <thead>
-              <tr style={{background:C.silver}}>
-                {["Client","ID","Jurisdiction","CCY","Asset Value","Cash","Liabilities","Status"].map(h=>(
-                  <th key={h} style={{textAlign:"left",padding:"9px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+              <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+                {["Holding","Account","Shares","Purchase Price","Market Value","Gain / Loss","% Change"].map(h=>(
+                  <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {clients.map((cl,i) => {
-                const val = valuations[cl.id];
-                const aum = val ? convertAmount(val.totalAssetValuation,"USD",selectedCcy) : 0;
-                const cash = val ? convertAmount(val.totalCashBalance,"USD",selectedCcy) : 0;
-                const liab = val ? convertAmount(val.totalLiabilities,"USD",selectedCcy) : 0;
-                return (
-                  <tr key={cl.id} onClick={()=>{setSelectedClient(cl.id);setSection("clients");}}
-                    style={{borderBottom:"0.5px solid "+C.silver,cursor:"pointer",background:i%2===0?C.white:"#FAFBFC"}}
-                    onMouseEnter={e=>e.currentTarget.style.background=C.tealLight}
-                    onMouseLeave={e=>e.currentTarget.style.background=i%2===0?C.white:"#FAFBFC"}>
-                    <td style={{padding:"10px 12px"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:9}}>
-                        <div style={{width:30,height:30,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:10,fontWeight:700,flexShrink:0}}>
-                          {cl.name ? cl.name.split(" ").map(n=>n[0]).join("").slice(0,2) : "?"}
-                        </div>
-                        <div>
-                          <div style={{fontWeight:600,color:C.navy,fontSize:13}}>{cl.name}</div>
-                          <div style={{fontSize:10,color:C.faint}}>{cl.email}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td style={{padding:"10px 12px",color:C.faint,fontSize:11,fontFamily:"monospace",whiteSpace:"nowrap"}}>{cl.primaryCode}</td>
-                    <td style={{padding:"10px 12px",color:C.text}}>{cl.jurisdiction}</td>
-                    <td style={{padding:"10px 12px",color:C.text}}>{cl.reportingCcy}</td>
-                    <td style={{padding:"10px 12px",fontWeight:600,color:C.navy,whiteSpace:"nowrap"}}>{sym}{fmt(aum,0)}</td>
-                    <td style={{padding:"10px 12px",color:C.green,fontWeight:500,whiteSpace:"nowrap"}}>{sym}{fmt(cash,0)}</td>
-                    <td style={{padding:"10px 12px",color:C.red,fontWeight:500,whiteSpace:"nowrap"}}>{sym}{fmt(liab,0)}</td>
-                    <td style={{padding:"10px 12px"}}><Badge color={cl.verified?"success":"warning"}>{cl.verified?"Verified":"Pending"}</Badge></td>
-                  </tr>
-                );
-              })}
+              {holdings.map((h,i)=>(
+                <tr key={i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2===0?C.white:"#FAFBFC"}}>
+                  <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>{h.name}</td>
+                  <td style={{padding:"10px 12px",color:C.faint,fontSize:11}}>{h.account}</td>
+                  <td style={{padding:"10px 12px",color:C.text}}>{h.shares.toLocaleString()}</td>
+                  <td style={{padding:"10px 12px",color:C.text}}>{h.purchasePrice}</td>
+                  <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>{h.marketValue}</td>
+                  <td style={{padding:"10px 12px",color:posColor(h.pctChange)}}>{h.gainLoss}</td>
+                  <td style={{padding:"10px 12px"}}>
+                    <span style={{background:posBg(h.pctChange),color:posColor(h.pctChange),fontSize:11,fontWeight:600,padding:"2px 7px",borderRadius:100}}>{pct(h.pctChange)}</span>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
-      </div>
+      )}
 
+      {tab==="transactions" && (
+        <div>
+          <div style={{display:"flex",gap:10,marginBottom:14,flexWrap:"wrap",alignItems:"center"}}>
+            <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search transactions..." style={{padding:"7px 12px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",flex:1,minWidth:160,color:C.navy}}/>
+            <select value={txFilter} onChange={e=>setTxFilter(e.target.value)} style={{padding:"7px 12px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",color:C.navy,background:C.white}}>
+              <option value="all">All types</option>
+              <option value="trade">Trades</option>
+              <option value="cashflow">Cashflows</option>
+              <option value="dividend">Dividends</option>
+            </select>
+            <div style={{fontSize:12,color:C.faint}}>{filteredTxns.length} records</div>
+          </div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:800}}>
+              <thead>
+                <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+                  {["Date","Type","Ticker","Description","Account","CCY","Consideration","Net Amount"].map(h=>(
+                    <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredTxns.map(t=>(
+                  <tr key={t.id} style={{borderBottom:"0.5px solid "+C.silver}}>
+                    <td style={{padding:"8px 12px",color:C.faint,whiteSpace:"nowrap"}}>{t.tradedate}</td>
+                    <td style={{padding:"8px 12px"}}><Badge color={t.txtype==="BUY"?"success":t.txtype==="SELL"?"error":t.txtype==="Dividend"?"navy":"info"}>{t.txtype}</Badge></td>
+                    <td style={{padding:"8px 12px",fontWeight:600,color:C.navy}}>{t.ticker}</td>
+                    <td style={{padding:"8px 12px",color:C.text,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
+                    <td style={{padding:"8px 12px",color:C.faint,fontSize:11}}>{t.accountId}</td>
+                    <td style={{padding:"8px 12px",color:C.faint}}>{t.ccy}</td>
+                    <td style={{padding:"8px 12px",color:C.navy,fontFamily:"monospace"}}>{t.consideration.toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                    <td style={{padding:"8px 12px",color:posColor(t.clientnetamt),fontFamily:"monospace"}}>{t.clientnetamt >= 0 ? "+" : ""}{t.clientnetamt.toLocaleString("en-GB",{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab==="withdrawals" && (
+        <div>
+          <div style={{marginBottom:16,fontSize:13,color:C.faint}}>Processed withdrawal payments for this client.</div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead>
+              <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+                {["Date Requested","Type","Currency","Requested Amount","Actual Paid","Payment Date"].map(h=>(
+                  <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {withdrawals.length === 0 ? (
+                <tr><td colSpan={6} style={{padding:24,textAlign:"center",color:C.faint}}>No withdrawals recorded</td></tr>
+              ) : withdrawals.map((w,i)=>(
+                <tr key={i} style={{borderBottom:"0.5px solid "+C.silver}}>
+                  <td style={{padding:"10px 12px",color:C.text}}>{w.dateRequested}</td>
+                  <td style={{padding:"10px 12px"}}><Badge color="info">{w.type}</Badge></td>
+                  <td style={{padding:"10px 12px",color:C.faint}}>{w.currency}</td>
+                  <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>${fmt(w.requestedAmount,2)}</td>
+                  <td style={{padding:"10px 12px",fontWeight:600,color:C.green}}>${fmt(w.actualPaid,2)}</td>
+                  <td style={{padding:"10px 12px",color:C.text}}>{w.paymentDate}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div style={{marginTop:16,background:C.silver,borderRadius:8,padding:"12px 16px",display:"flex",justifyContent:"space-between"}}>
+            <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Total paid</span>
+            <span style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>${fmt(withdrawals.reduce((s,w)=>s+w.actualPaid,0),2)}</span>
+          </div>
+        </div>
+      )}
+
+      {tab==="distribution" && (
+        <div>
+          {distributions.length === 0 ? (
+            <div style={{padding:32,textAlign:"center",color:C.faint}}>
+              <div style={{fontSize:32,marginBottom:12}}>◇</div>
+              <div style={{fontSize:14,fontWeight:600,color:C.navy,marginBottom:6}}>No distributions</div>
+            </div>
+          ) : distributions.map((dist,di)=>(
+            <div key={di} style={{marginBottom:24}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+                <div>
+                  <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>{dist.name}</div>
+                  <div style={{fontSize:12,color:C.faint}}>Date: {dist.date} · {dist.payments.length} payment{dist.payments.length!==1?"s":""}</div>
+                </div>
+                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.navy}}>
+                  ${fmt(dist.payments.reduce((s,p)=>s+p.amount,0),2)}
+                </div>
+              </div>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+                <thead>
+                  <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+                    {["Account","Recipient","Date","Amount"].map(h=>(
+                      <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase"}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {dist.payments.map((p,i)=>(
+                    <tr key={i} style={{borderBottom:"0.5px solid "+C.silver}}>
+                      <td style={{padding:"10px 12px",fontFamily:"monospace",fontSize:12,color:C.faint}}>{p.accountNumber}</td>
+                      <td style={{padding:"10px 12px",color:C.text}}>{p.recipient}</td>
+                      <td style={{padding:"10px 12px",color:C.text}}>{p.date}</td>
+                      <td style={{padding:"10px 12px",fontWeight:600,color:C.navy,fontFamily:"Space Grotesk,sans-serif"}}>${fmt(p.amount,2)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab==="documents" && (
+        <DocumentsTab clientId={clientId} isAdviser={true} liveDocuments={liveDocuments}/>
+      )}
+
+      {tab==="crm" && (
+        <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(2,1fr)",gap:20}}>
+          <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:20}}>
+            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.navy,marginBottom:14}}>Client Details</div>
+            {[
+              {label:"Full Name", value:client.name},
+              {label:"Client ID", value:client.id},
+              {label:"Primary Code", value:client.primaryCode},
+              {label:"Client Reference", value:client.clientId},
+              {label:"Account Number", value:client.accountNumber},
+              {label:"Email", value:client.email},
+              {label:"Address", value:client.address},
+              {label:"Jurisdiction", value:client.jurisdiction},
+              {label:"Reporting CCY", value:client.reportingCcy},
+              {label:"Verified", value:client.verified?"Yes":"No"},
+            ].map(row=>(
+              <div key={row.label} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"0.5px solid "+C.silver}}>
+                <span style={{fontSize:12,color:C.faint}}>{row.label}</span>
+                <span style={{fontSize:13,fontWeight:500,color:C.navy,textAlign:"right"}}>{row.value}</span>
+              </div>
+            ))}
+          </div>
+          <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:20}}>
+            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.navy,marginBottom:14}}>Bank Details</div>
+            {[
+              {label:"Bank Name", value:client.bankName},
+              {label:"Account Number", value:client.bankAccount},
+              {label:"Sort Code", value:client.bankSort},
+            ].map(row=>(
+              <div key={row.label} style={{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"0.5px solid "+C.silver}}>
+                <span style={{fontSize:12,color:C.faint}}>{row.label}</span>
+                <span style={{fontSize:13,fontWeight:500,color:C.navy}}>{row.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -897,10 +1156,10 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
   const client = CLIENTS.find(c => c.id === user?.clientId) || CLIENTS[0];
   const clientId = client?.id;
   const val = (propValuations || VALUATIONS)[clientId];
-  const holdings = (propHoldings || HOLDINGS)[clientId] || [];
-  const withdrawals = (propWithdrawals || WITHDRAWALS)[clientId] || [];
-  const distributions = (propDistributions || DISTRIBUTIONS)[clientId] || [];
-  const allTxns = propTxns || TXNS;
+  const holdings = (detailData&&detailData.holdings) ? detailData.holdings[clientId]||[] : (propHoldings||HOLDINGS)[clientId]||[];
+  const withdrawals = (detailData&&detailData.withdrawals) ? detailData.withdrawals[clientId]||[] : (propWithdrawals||WITHDRAWALS)[clientId]||[];
+  const distributions = (detailData&&detailData.distributions) ? detailData.distributions[clientId]||[] : (propDistributions||DISTRIBUTIONS)[clientId]||[];
+  const allTxns = (detailData&&detailData.txns&&detailData.txns.length>0) ? detailData.txns : (propTxns||TXNS);
   const txns = allTxns.filter(t => t.clientId === clientId);
 
   const filteredTxns = useMemo(() => {
@@ -1159,7 +1418,6 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
 export default function App() {
   const {user, loading: authLoading, error: authError, login, logout} = useAuth();
   const {data: liveData, loading: dataLoading, error: dataError, lastUpdated, refresh} = useOneDriveData();
-  const {data: clientDetailData, loading: clientDetailLoading} = useClientDetailData(selectedClient || previewClient);
   const [section, setSection] = useState("dashboard");
   const [selectedClient, setSelectedClient] = useState(null);
   const [selectedCcy, setSelectedCcy] = useState("USD");
@@ -1169,11 +1427,11 @@ export default function App() {
   // Use live data if available, fall back to static
   const clients = (liveData && liveData.clients && liveData.clients.length > 0) ? liveData.clients : CLIENTS;
   const valuations = (liveData && liveData.valuations) ? liveData.valuations : VALUATIONS;
-  const holdings = (clientDetailData&&clientDetailData.holdings) ? clientDetailData.holdings : HOLDINGS;
-  const withdrawals = (clientDetailData&&clientDetailData.withdrawals) ? clientDetailData.withdrawals : WITHDRAWALS;
-  const distributions = (clientDetailData&&clientDetailData.distributions) ? clientDetailData.distributions : DISTRIBUTIONS;
-  const txns = (clientDetailData&&clientDetailData.txns&&clientDetailData.txns.length>0) ? clientDetailData.txns : TXNS;
-  const liveDocuments = (clientDetailData&&clientDetailData.documents) ? clientDetailData.documents : {};
+  const holdings = (liveData && liveData.holdings) ? liveData.holdings : HOLDINGS;
+  const withdrawals = (liveData && liveData.withdrawals) ? liveData.withdrawals : WITHDRAWALS;
+  const distributions = (liveData && liveData.distributions) ? liveData.distributions : DISTRIBUTIONS;
+  const txns = (liveData && liveData.txns && liveData.txns.length > 0) ? liveData.txns : TXNS;
+  const liveDocuments = (liveData && liveData.documents) ? liveData.documents : {};
   const loading = authLoading;
   const error = authError;
 
