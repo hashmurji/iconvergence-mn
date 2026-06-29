@@ -228,12 +228,12 @@ function buildDistributions(rows) {
 }
 
 export default async function handler(req, res) {
-  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET");
-  
   if (req.method === "OPTIONS") return res.status(200).end();
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+
+  const filterClientId = req.query && req.query.clientId ? req.query.clientId : null;
 
   try {
     const token = await getAccessToken();
@@ -253,8 +253,9 @@ export default async function handler(req, res) {
     const sheets = await parseExcel(excelBuffer);
     const txns = parseCSV(csvText);
 
-    // Build data objects from sheets
-    const clients = buildClients(sheets["Client Details"] || []);
+    // Build data objects from sheets - filter by clientId if provided
+    const allClients = buildClients(sheets["Client Details"] || []);
+    const clients = filterClientId ? allClients.filter(c => c.id === filterClientId) : allClients;
     const valuations = buildValuations(sheets["Valuations"] || []);
     const holdings = buildHoldings(sheets["Holdings"] || []);
     const withdrawals = buildWithdrawals(sheets["Processed Withdrawals"] || []);

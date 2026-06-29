@@ -500,7 +500,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
   useEffect(() => {
     if (!clientId) return;
     setDetailLoading(true); setDetailData(null);
-    fetch("/api/onedrive").then(r=>r.json()).then(d=>{ if(!d.error) setDetailData(d); }).catch(()=>{}).finally(()=>setDetailLoading(false));
+    fetch("/api/onedrive?clientId="+clientId).then(r=>r.json()).then(d=>{ if(!d.error) setDetailData(d); }).catch(()=>{}).finally(()=>setDetailLoading(false));
   }, [clientId]);
     const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
