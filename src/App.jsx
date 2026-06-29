@@ -417,11 +417,11 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
                   onMouseLeave={e=>e.currentTarget.style.background=C.white}>
                   <div style={{display:"flex",alignItems:"center",gap:12}}>
                     <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:11,fontWeight:700,flexShrink:0}}>
-                      {cl.name ? cl.name.split(" ").map(n=>n[0]).join("").slice(0,2) : "?"}
+                      {cl.name ? cl.name.trim().split(" ").filter(Boolean).map(n=>n[0]).join("").slice(0,2) : "?"}
                     </div>
                     <div>
-                      <div style={{fontWeight:600,color:C.navy,fontSize:14}}>{cl.name}</div>
-                      <div style={{fontSize:11,color:C.faint}}>{cl.primaryCode} · {cl.jurisdiction}</div>
+                      <div style={{fontWeight:600,color:C.navy,fontSize:14}}>{cl.name || "Unknown"}</div>
+                      <div style={{fontSize:11,color:C.faint}}>{cl.primaryCode||""} · {cl.jurisdiction||""}</div>
                     </div>
                   </div>
                   <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
