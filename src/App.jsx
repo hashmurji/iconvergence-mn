@@ -168,7 +168,7 @@ const C = {
 };
 
 // --- FX (static for now - will be updated manually) -------------------------
-const FX = { USDAUD: 1.501186, AUDUSD: 1/1.501186, USDEUR: 0.91954, EURUSD: 1/0.91954, USDGBP: 0.792519, GBPUSD: 1/0.792519, AUDEUR: 0.91954/1.501186, EURAUD: 1.501186/0.91954, AUDGBP: 0.792519/1.501186, GBPAUD: 1.501186/0.792519, EURGBP: 0.792519/0.91954, GBPEUR: 0.91954/0.792519 };
+const FX = { USDAUD: 1.501186, AUDUSD: 0.6661, USDEUR: 0.91954, EURUSD: 1.0875, USDGBP: 0.792519, GBPUSD: 1.2619, AUDEUR: 0.6128, EURAUD: 1.6318, AUDGBP: 0.5279, GBPAUD: 1.8944, EURGBP: 0.8620, GBPEUR: 1.1600 };
 const CCY_SYMBOLS = { USD: "$", GBP: "£", EUR: "€", AUD: "A$" };
 const convertAmount = (amount, fromCcy, toCcy) => {
   if (!amount || fromCcy === toCcy) return amount || 0;
