@@ -459,7 +459,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
         </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(280px,1fr))",gap:12,marginBottom:14}}>
+      <div style={{display:"flex",flexDirection:"column",gap:0,marginBottom:14,background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden"}}>
         {clients.map(c => {
           const val = valuations[c.id];
           const aum = val ? convertAmount(val.totalAssetValuation, "USD", selectedCcy) : 0;
@@ -467,24 +467,25 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
           const net = aum - liab;
           return (
             <div key={c.id} onClick={()=>{setSelectedClient(c.id);setSection("clients");}}
-              style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:18,cursor:"pointer",transition:"border-color 0.15s",boxShadow:"0 2px 8px rgba(0,0,0,0.05)"}}
-              onMouseEnter={e=>e.currentTarget.style.borderColor=C.teal}
-              onMouseLeave={e=>e.currentTarget.style.borderColor=C.silver}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:12}}>
-                <div style={{display:"flex",alignItems:"center",gap:10}}>
-                  <div style={{width:38,height:38,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:13,fontWeight:700}}>
-                    {c.name.split(" ").map(n=>n[0]).join("")}
-                  </div>
-                  <div>
-                    <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.navy}}>{c.name}</div>
-                    <div style={{fontSize:10,color:C.faint}}>{c.primaryCode}</div>
-                  </div>
+              style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",cursor:"pointer",borderBottom:"0.5px solid "+C.silver,background:"transparent"}}
+              onMouseEnter={e=>e.currentTarget.style.background=C.tealLight}
+              onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+              <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
+                <div style={{width:32,height:32,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:11,fontWeight:700,flexShrink:0}}>
+                  {c.name ? c.name.trim().split(" ").filter(Boolean).map(n=>n[0]).join("").slice(0,2) : "?"}
+                </div>
+                <div style={{minWidth:0}}>
+                  <div style={{fontWeight:600,color:C.navy,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||"Unknown"}</div>
+                  <div style={{fontSize:10,color:C.faint}}>{String(c.primaryCode||"")} · {c.jurisdiction||""}</div>
+                </div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:16,flexShrink:0}}>
+                <div style={{textAlign:"right"}}>
+                  <div style={{fontWeight:600,color:C.navy,fontSize:13}}>{sym}{fmt(aum,0)}</div>
+                  <div style={{fontSize:10,color:C.red}}>{sym}{fmt(liab,0)} liab</div>
                 </div>
                 <Badge color={c.verified?"success":"warning"}>{c.verified?"Verified":"Pending"}</Badge>
               </div>
-              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,color:C.navy,letterSpacing:-0.5,marginBottom:4}}>{sym}{fmt(aum,0)}</div>
-              <div style={{fontSize:12,color:C.faint}}>Net: {sym}{fmt(net,0)} after liabilities</div>
-              <div style={{marginTop:10,fontSize:11,color:C.teal,fontWeight:600}}>View portfolio &rarr;</div>
             </div>
           );
         })}
