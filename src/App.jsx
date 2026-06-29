@@ -108,11 +108,12 @@ const useOneDriveData = () => {
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
 
-  const fetchData = async () => {
+  const fetchData = async (forceRefresh=false) => {
     setLoading(true);
     setError(null);
     try {
-      const [cr, vr] = await Promise.all([fetch("/api/clients"), fetch("/api/valuations")]);
+      const bust = forceRefresh ? '?t='+Date.now() : '';
+      const [cr, vr] = await Promise.all([fetch("/api/clients"+bust), fetch("/api/valuations"+bust)]);
       const cj = await cr.json();
       const vj = await vr.json();
       if (cj.error) throw new Error(cj.error);
@@ -131,7 +132,7 @@ const useOneDriveData = () => {
 
   useEffect(() => { fetchData(); }, []);
 
-  return { data, loading, error, lastUpdated, refresh: fetchData };
+  return { data, loading, error, lastUpdated, refresh: (force=false) => fetchData(force) };
 };
 
 // --- BRAND -------------------------------------------------------------------
@@ -366,8 +367,8 @@ const Nav = ({section, setSection, selectedCcy, setCcy, user, logout}) => {
 const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propClients, valuations: propValuations, lastUpdated, dataError, onRefresh}) => {
   const isMobile = useIsMobile();
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
-  const clients = propClients || CLIENTS;
-  const valuations = propValuations || VALUATIONS;
+  const clients = propClients || [];
+  const valuations = propValuations || {};
   const [search, setSearch] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
   const searchResults = useMemo(() => {
@@ -394,7 +395,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
           {lastUpdated && <div style={{fontSize:11,color:C.faint,marginTop:3}}>Last synced: {new Date(lastUpdated).toLocaleString()}</div>}
           {dataError && <div style={{fontSize:11,color:C.red,marginTop:3}}>Data error: {dataError} — showing cached data</div>}
         </div>
-        {onRefresh && <button onClick={onRefresh} style={{background:C.teal,color:C.white,border:"none",borderRadius:6,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",gap:6}}>↻ Refresh data</button>}
+        {onRefresh && <button onClick={()=>onRefresh(true)} style={{background:C.teal,color:C.white,border:"none",borderRadius:6,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",gap:6}}>↻ Refresh data</button>}
       </div>
 
       <div style={{position:"relative",marginBottom:16}}>
@@ -793,8 +794,8 @@ const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreview
   const [search, setSearch] = useState("");
   const isMobile = useIsMobile();
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
-  const clients = propClients || CLIENTS;
-  const valuations = propValuations || VALUATIONS;
+  const clients = propClients || [];
+  const valuations = propValuations || {};
 
   if (selectedClient) {
     return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} holdings={propHoldings} withdrawals={propWithdrawals} distributions={propDistributions} txns={propTxns} valuations={valuations} clients={clients} liveDocuments={liveDocuments}/>;
