@@ -374,10 +374,10 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
     if (!search || search.length < 2) return [];
     const q = search.toLowerCase();
     return clients.filter(cl =>
-      (cl.name && cl.name.toLowerCase().includes(q)) ||
-      (cl.id && cl.id.toLowerCase().includes(q)) ||
-      (cl.email && cl.email.toLowerCase().includes(q)) ||
-      (cl.primaryCode && cl.primaryCode.toLowerCase().includes(q))
+      (cl.name && String(cl.name).toLowerCase().includes(q)) ||
+      (cl.id && String(cl.id).toLowerCase().includes(q)) ||
+      (cl.email && String(cl.email).toLowerCase().includes(q)) ||
+      (cl.primaryCode && String(cl.primaryCode).toLowerCase().includes(q))
     ).slice(0, 10);
   }, [search, clients]);
   const handleSelectClient = (id) => { setSearch(""); setSearchFocused(false); setSelectedClient(id); setSection("clients"); };
