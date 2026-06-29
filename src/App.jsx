@@ -112,16 +112,15 @@ const useOneDriveData = () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/onedrive");
+      const res = await fetch("/api/clients");
       if (!res.ok) throw new Error("API error: " + res.status);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      setData(json);
+      setData({ clients: json.clients, valuations: {}, holdings: {}, withdrawals: {}, distributions: {}, txns: [], documents: {}, lastUpdated: json.lastUpdated });
       setLastUpdated(json.lastUpdated);
     } catch (err) {
-      console.error("OneDrive fetch error:", err);
+      console.error("Clients fetch error:", err);
       setError(err.message);
-      // Fall back to static data if API fails
       setData(null);
     } finally {
       setLoading(false);
@@ -131,6 +130,26 @@ const useOneDriveData = () => {
   useEffect(() => { fetchData(); }, []);
 
   return { data, loading, error, lastUpdated, refresh: fetchData };
+};
+
+const useClientDetailData = (clientId) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!clientId) { setData(null); return; }
+    setLoading(true);
+    setError(null);
+    setData(null);
+    fetch("/api/onedrive")
+      .then(r => r.json())
+      .then(json => { if (json.error) throw new Error(json.error); setData(json); })
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [clientId]);
+
+  return { data, loading, error };
 };
 
 // --- AUTH0 USERS HOOK -------------------------------------------------------
