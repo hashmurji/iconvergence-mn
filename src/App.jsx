@@ -102,6 +102,18 @@ const useIsMobile = () => {
 
 
 // --- ONEDRIVE DATA HOOK ------------------------------------------------------
+const C = {
+  navy: "#0D1B2E", navyMid: "#162840", navyLight: "#1E3A5F",
+  teal: "#00B8B0", tealLight: "#E6F9F8",
+  silver: "#EFF2F6", silverMid: "#C4CDD8",
+  white: "#FFFFFF", text: "#2D3748", faint: "#8A9AB0",
+  green: "#10B981", greenBg: "#D1FAE5",
+  red: "#EF4444", redBg: "#FEE2E2",
+  amber: "#F59E0B", amberBg: "#FEF3C7",
+  gold: "#F5A623", goldLight: "#FEF5E7",
+};
+
+
 const useOneDriveData = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -152,17 +164,6 @@ const useClientDetailData = (clientId) => {
 };
 
 // --- BRAND -------------------------------------------------------------------
-const C = {
-  navy: "#0D1B2E", navyMid: "#162840", navyLight: "#1E3A5F",
-  teal: "#00B8B0", tealLight: "#E6F9F8",
-  silver: "#EFF2F6", silverMid: "#C4CDD8",
-  white: "#FFFFFF", text: "#2D3748", faint: "#8A9AB0",
-  green: "#10B981", greenBg: "#D1FAE5",
-  red: "#EF4444", redBg: "#FEE2E2",
-  amber: "#F59E0B", amberBg: "#FEF3C7",
-  gold: "#F5A623", goldLight: "#FEF5E7",
-};
-
 // --- FX (static for now - will be updated manually) -------------------------
 const FX = { USDAUD: 1.501186, AUDUSD: 0.6661, USDEUR: 0.91954, EURUSD: 1.0875, USDGBP: 0.792519, GBPUSD: 1.2619, AUDEUR: 0.6128, EURAUD: 1.6318, AUDGBP: 0.5279, GBPAUD: 1.8944, EURGBP: 0.8620, GBPEUR: 1.1600 };
 const CCY_SYMBOLS = { USD: "$", GBP: "£", EUR: "€", AUD: "A$" };
