@@ -112,12 +112,15 @@ const useOneDriveData = () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/clients");
-      if (!res.ok) throw new Error("API error: " + res.status);
-      const json = await res.json();
-      if (json.error) throw new Error(json.error);
-      setData({ clients: json.clients, valuations: {}, holdings: {}, withdrawals: {}, distributions: {}, txns: [], documents: {}, lastUpdated: json.lastUpdated });
-      setLastUpdated(json.lastUpdated);
+      const [clientsRes, valuationsRes] = await Promise.all([
+        fetch("/api/clients"),
+        fetch("/api/valuations"),
+      ]);
+      const clientsJson = await clientsRes.json();
+      const valuationsJson = await valuationsRes.json();
+      if (clientsJson.error) throw new Error(clientsJson.error);
+      setData({ clients: clientsJson.clients, valuations: valuationsJson.valuations || {}, holdings: {}, withdrawals: {}, distributions: {}, txns: [], documents: {}, lastUpdated: clientsJson.lastUpdated });
+      setLastUpdated(clientsJson.lastUpdated);
     } catch (err) {
       console.error("Clients fetch error:", err);
       setError(err.message);
