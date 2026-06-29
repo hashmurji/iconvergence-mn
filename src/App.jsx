@@ -133,6 +133,20 @@ const useOneDriveData = () => {
   return { data, loading, error, lastUpdated, refresh: fetchData };
 };
 
+// --- AUTH0 USERS HOOK -------------------------------------------------------
+const useAuth0Users = () => {
+  const [auth0Users, setAuth0Users] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    fetch("/api/auth0users")
+      .then(r => r.json())
+      .then(d => { if (d.users) setAuth0Users(d.users); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+  return { auth0Users, loading };
+};
+
 // --- BRAND -------------------------------------------------------------------
 const C = {
   navy: "#0D1B2E", navyMid: "#162840", navyLight: "#1E3A5F",
@@ -353,11 +367,25 @@ const Nav = ({section, setSection, selectedCcy, setCcy, user, logout}) => {
 };
 
 // --- DASHBOARD ---------------------------------------------------------------
-const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propClients, valuations: propValuations, lastUpdated, dataError, onRefresh}) => {
+const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propClients, valuations: propValuations, lastUpdated, dataError, onRefresh, auth0Users}) => {
   const isMobile = useIsMobile();
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
   const clients = propClients || CLIENTS;
   const valuations = propValuations || VALUATIONS;
+  const [search, setSearch] = useState("");
+  const [searchFocused, setSearchFocused] = useState(false);
+  const activeCount = auth0Users && auth0Users.length > 0 ? auth0Users.length : clients.length;
+  const searchResults = useMemo(() => {
+    if (!search || search.length < 2) return [];
+    const q = search.toLowerCase();
+    return clients.filter(c =>
+      (c.name && c.name.toLowerCase().includes(q)) ||
+      (c.id && c.id.toLowerCase().includes(q)) ||
+      (c.email && c.email.toLowerCase().includes(q)) ||
+      (c.primaryCode && c.primaryCode.toLowerCase().includes(q))
+    ).slice(0, 10);
+  }, [search, clients]);
+  const handleSelectClient = (id) => { setSearch(""); setSearchFocused(false); setSelectedClient(id); setSection("clients"); };
   const totalAUM = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalAssetValuation, "USD", selectedCcy), 0);
   const totalCash = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalCashBalance, "USD", selectedCcy), 0);
   const totalLiabilities = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalLiabilities, "USD", selectedCcy), 0);
@@ -374,6 +402,51 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
         {onRefresh && <button onClick={onRefresh} style={{background:C.teal,color:C.white,border:"none",borderRadius:6,padding:"7px 14px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",gap:6}}>↻ Refresh data</button>}
       </div>
 
+      <div style={{position:"relative",marginBottom:16}}>
+        <div style={{display:"flex",alignItems:"center",background:C.white,border:"1.5px solid "+(searchFocused?C.teal:C.silverMid),borderRadius:8,padding:"10px 14px",gap:10}}>
+          <span style={{color:C.faint}}>&#128269;</span>
+          <input value={search} onChange={e=>setSearch(e.target.value)} onFocus={()=>setSearchFocused(true)} onBlur={()=>setTimeout(()=>setSearchFocused(false),150)}
+            placeholder="Search clients by name, ID, email..."
+            style={{flex:1,border:"none",outline:"none",fontSize:14,fontFamily:"'Inter',sans-serif",color:C.navy,background:"transparent"}}/>
+          {search && <button onClick={()=>setSearch("")} style={{background:"none",border:"none",cursor:"pointer",color:C.faint,fontSize:16,padding:0}}>x</button>}
+        </div>
+        {searchResults.length > 0 && (
+          <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.white,border:"1px solid "+C.silver,borderRadius:8,boxShadow:"0 8px 24px rgba(0,0,0,0.12)",zIndex:100,marginTop:4,maxHeight:380,overflowY:"auto"}}>
+            {searchResults.map(cl => {
+              const val = valuations[cl.id];
+              const aum = val ? convertAmount(val.totalAssetValuation,"USD",selectedCcy) : null;
+              const isActive = auth0Users && auth0Users.some(u => u.email === cl.email);
+              return (
+                <div key={cl.id} onMouseDown={()=>handleSelectClient(cl.id)}
+                  style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",cursor:"pointer",borderBottom:"0.5px solid "+C.silver}}
+                  onMouseEnter={e=>e.currentTarget.style.background=C.tealLight}
+                  onMouseLeave={e=>e.currentTarget.style.background=""}>
+                  <div style={{display:"flex",alignItems:"center",gap:12}}>
+                    <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:11,fontWeight:700,flexShrink:0}}>
+                      {cl.name ? cl.name.split(" ").map(n=>n[0]).join("").slice(0,2) : "?"}
+                    </div>
+                    <div>
+                      <div style={{fontWeight:600,color:C.navy,fontSize:14}}>{cl.name}</div>
+                      <div style={{fontSize:11,color:C.faint}}>{cl.primaryCode} · {cl.jurisdiction}</div>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                    {aum !== null && <div style={{fontSize:13,fontWeight:600,color:C.navy}}>{sym}{fmt(aum,0)}</div>}
+                    {isActive && <Badge color="success">Active</Badge>}
+                    <span style={{color:C.teal,fontSize:12,fontWeight:600}}>View →</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {search.length >= 2 && searchResults.length === 0 && (
+          <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.white,border:"1px solid "+C.silver,borderRadius:8,padding:16,textAlign:"center",color:C.faint,fontSize:13,zIndex:100,marginTop:4}}>
+            No clients found
+          </div>
+        )}
+      </div>
+
       <div style={{background:C.navy,borderRadius:12,padding:isMobile?"16px":24,marginBottom:14,display:"flex",flexWrap:"wrap",gap:16,justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
           <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:5}}>Total AUM ({selectedCcy})</div>
@@ -382,7 +455,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
           {[
-            {label:"Active clients", value:clients.length.toString()},
+            {label:"Active clients", value:activeCount.toString()},
             {label:"Cash balance", value:sym+fmt(totalCash,0)},
             {label:"Total liabilities", value:sym+fmt(totalLiabilities,0)},
             {label:"Verified", value:CLIENTS.filter(c=>c.verified).length+" of "+CLIENTS.length},
@@ -416,7 +489,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
                     <div style={{fontSize:10,color:C.faint}}>{c.primaryCode}</div>
                   </div>
                 </div>
-                <Badge color={c.verified?"success":"warning"}>{c.verified?"Verified":"Pending"}</Badge>
+                <Badge color={(auth0Users&&auth0Users.some(u=>u.email===c.email))?"success":"warning"}>{(auth0Users&&auth0Users.some(u=>u.email===c.email))?"Active":"No account"}</Badge>
               </div>
               <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,color:C.navy,letterSpacing:-0.5,marginBottom:4}}>{sym}{fmt(aum,0)}</div>
               <div style={{fontSize:12,color:C.faint}}>Net: {sym}{fmt(net,0)} after liabilities</div>
@@ -1354,6 +1427,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
 export default function App() {
   const {user, loading: authLoading, error: authError, login, logout} = useAuth();
   const {data: liveData, loading: dataLoading, error: dataError, lastUpdated, refresh} = useOneDriveData();
+  const {auth0Users} = useAuth0Users();
   const [section, setSection] = useState("dashboard");
   const [selectedClient, setSelectedClient] = useState(null);
   const [selectedCcy, setSelectedCcy] = useState("USD");
@@ -1402,7 +1476,7 @@ export default function App() {
     <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       <Nav section={section} setSection={handleSection} selectedCcy={selectedCcy} setCcy={setSelectedCcy} user={user} logout={logout}/>
       <div style={{flex:1,overflowY:"auto",paddingBottom:isMobile?68:0}}>
-        {section==="dashboard" && <Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} clients={clients} valuations={valuations} lastUpdated={lastUpdated} dataError={dataError} onRefresh={refresh}/>}
+        {section==="dashboard" && <Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} clients={clients} valuations={valuations} lastUpdated={lastUpdated} dataError={dataError} onRefresh={refresh} auth0Users={auth0Users}/>}
         {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} clients={clients} valuations={valuations} holdings={holdings} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>}
         {section==="withdrawals" && <WithdrawalsPage selectedCcy={selectedCcy} withdrawals={withdrawals} clients={clients}/>}
         {section==="connect" && <Connect/>}
