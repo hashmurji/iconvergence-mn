@@ -134,6 +134,23 @@ const useOneDriveData = () => {
   return { data, loading, error, lastUpdated, refresh: fetchData };
 };
 
+// --- CLIENT DETAIL HOOK -----------------------------------------------------
+const useClientDetailData = (clientId) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!clientId) { setData(null); return; }
+    setLoading(true);
+    setData(null);
+    fetch("/api/onedrive")
+      .then(r => r.json())
+      .then(json => { if (!json.error) setData(json); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [clientId]);
+  return { data, loading };
+};
+
 // --- BRAND -------------------------------------------------------------------
 const C = {
   navy: "#0D1B2E", navyMid: "#162840", navyLight: "#1E3A5F",
@@ -1141,6 +1158,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
 export default function App() {
   const {user, loading: authLoading, error: authError, login, logout} = useAuth();
   const {data: liveData, loading: dataLoading, error: dataError, lastUpdated, refresh} = useOneDriveData();
+  const {data: clientDetailData, loading: clientDetailLoading} = useClientDetailData(selectedClient || previewClient);
   const [section, setSection] = useState("dashboard");
   const [selectedClient, setSelectedClient] = useState(null);
   const [selectedCcy, setSelectedCcy] = useState("USD");
@@ -1150,11 +1168,11 @@ export default function App() {
   // Use live data if available, fall back to static
   const clients = (liveData && liveData.clients && liveData.clients.length > 0) ? liveData.clients : CLIENTS;
   const valuations = (liveData && liveData.valuations) ? liveData.valuations : VALUATIONS;
-  const holdings = (liveData && liveData.holdings) ? liveData.holdings : HOLDINGS;
-  const withdrawals = (liveData && liveData.withdrawals) ? liveData.withdrawals : WITHDRAWALS;
-  const distributions = (liveData && liveData.distributions) ? liveData.distributions : DISTRIBUTIONS;
-  const txns = (liveData && liveData.txns && liveData.txns.length > 0) ? liveData.txns : TXNS;
-  const liveDocuments = (liveData && liveData.documents) ? liveData.documents : {};
+  const holdings = (clientDetailData&&clientDetailData.holdings) ? clientDetailData.holdings : HOLDINGS;
+  const withdrawals = (clientDetailData&&clientDetailData.withdrawals) ? clientDetailData.withdrawals : WITHDRAWALS;
+  const distributions = (clientDetailData&&clientDetailData.distributions) ? clientDetailData.distributions : DISTRIBUTIONS;
+  const txns = (clientDetailData&&clientDetailData.txns&&clientDetailData.txns.length>0) ? clientDetailData.txns : TXNS;
+  const liveDocuments = (clientDetailData&&clientDetailData.documents) ? clientDetailData.documents : {};
   const loading = authLoading;
   const error = authError;
 
