@@ -66,6 +66,8 @@ export default async function handler(req, res) {
       };
     }
 
+    res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=600");
+    res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=600");
     return res.status(200).json({ valuations, lastUpdated: new Date().toISOString() });
   } catch (err) {
     console.error("Valuations API error:", err);

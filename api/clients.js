@@ -65,6 +65,8 @@ export default async function handler(req, res) {
       bankName: r["Bank Name"] || "",
     })).filter(c => c.id);
 
+    res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=600");
+    res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=600");
     return res.status(200).json({
       clients,
       total: clients.length,
