@@ -112,18 +112,16 @@ const useOneDriveData = () => {
     setLoading(true);
     setError(null);
     try {
-      const [clientsRes, valuationsRes] = await Promise.all([
-        fetch("/api/clients"),
-        fetch("/api/valuations"),
-      ]);
+      const [clientsRes, valuationsRes] = await Promise.all([fetch("/api/clients"), fetch("/api/valuations")]);
       const clientsJson = await clientsRes.json();
       const valuationsJson = await valuationsRes.json();
       if (clientsJson.error) throw new Error(clientsJson.error);
-      setData({ clients: clientsJson.clients, valuations: valuationsJson.valuations || {}, holdings: {}, withdrawals: {}, distributions: {}, txns: [], documents: {}, lastUpdated: clientsJson.lastUpdated });
+      setData({ clients: clientsJson.clients, valuations: valuationsJson.valuations||{}, holdings: {}, withdrawals: {}, distributions: {}, txns: [], documents: {}, lastUpdated: clientsJson.lastUpdated });
       setLastUpdated(clientsJson.lastUpdated);
     } catch (err) {
-      console.error("Clients fetch error:", err);
+      console.error("OneDrive fetch error:", err);
       setError(err.message);
+      // Fall back to static data if API fails
       setData(null);
     } finally {
       setLoading(false);
@@ -135,38 +133,26 @@ const useOneDriveData = () => {
   return { data, loading, error, lastUpdated, refresh: fetchData };
 };
 
-const useClientDetailData = (clientId) => {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    if (!clientId) { setData(null); return; }
-    setLoading(true);
-    setError(null);
-    setData(null);
-    fetch("/api/onedrive")
-      .then(r => r.json())
-      .then(json => { if (json.error) throw new Error(json.error); setData(json); })
-      .catch(err => setError(err.message))
-      .finally(() => setLoading(false));
-  }, [clientId]);
-
-  return { data, loading, error };
-};
-
 // --- AUTH0 USERS HOOK -------------------------------------------------------
 const useAuth0Users = () => {
   const [auth0Users, setAuth0Users] = useState([]);
-  const [loading, setLoading] = useState(true);
   useEffect(() => {
-    fetch("/api/auth0users")
-      .then(r => r.json())
-      .then(d => { if (d.users) setAuth0Users(d.users); })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    fetch("/api/auth0users").then(r=>r.json()).then(d=>{ if(d.users) setAuth0Users(d.users); }).catch(()=>{});
   }, []);
-  return { auth0Users, loading };
+  return { auth0Users };
+};
+
+// --- CLIENT DETAIL HOOK -----------------------------------------------------
+const useClientDetailData = (clientId) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    if (!clientId) { setData(null); return; }
+    setLoading(true);
+    setData(null);
+    fetch("/api/onedrive").then(r=>r.json()).then(json=>{ if(!json.error) setData(json); }).catch(()=>{}).finally(()=>setLoading(false));
+  }, [clientId]);
+  return { data, loading };
 };
 
 // --- BRAND -------------------------------------------------------------------
@@ -182,14 +168,7 @@ const C = {
 };
 
 // --- FX (static for now - will be updated manually) -------------------------
-const FX = {
-  USDAUD: 1.501186, AUDUSD: 1/1.501186,
-  USDEUR: 0.91954, EURUSD: 1/0.91954,
-  USDGBP: 0.792519, GBPUSD: 1/0.792519,
-  AUDEUR: 0.91954/1.501186, EURAUD: 1.501186/0.91954,
-  AUDGBP: 0.792519/1.501186, GBPAUD: 1.501186/0.792519,
-  EURGBP: 0.792519/0.91954, GBPEUR: 0.91954/0.792519,
-};
+const FX = { USDAUD: 1.501186, AUDUSD: 1/1.501186, USDEUR: 0.91954, EURUSD: 1/0.91954, USDGBP: 0.792519, GBPUSD: 1/0.792519, AUDEUR: 0.91954/1.501186, EURAUD: 1.501186/0.91954, AUDGBP: 0.792519/1.501186, GBPAUD: 1.501186/0.792519, EURGBP: 0.792519/0.91954, GBPEUR: 0.91954/0.792519 };
 const CCY_SYMBOLS = { USD: "$", GBP: "£", EUR: "€", AUD: "A$" };
 const convertAmount = (amount, fromCcy, toCcy) => {
   if (!amount || fromCcy === toCcy) return amount || 0;
@@ -285,7 +264,16 @@ const TXNS = [{"id":0,"selector":"Cashflow","tradedate":"27/07/2023","settdate":
 
 
 // --- DOCUMENTS --------------------------------------------------------------
-const DOCUMENTS = {};
+const DOCUMENTS = {
+  "C00007630": [
+    { id: "d1", name: "Portfolio Valuation Report Q4 2024.pdf", category: "Valuation", date: "2025-01-15", size: "1.2 MB", uploadedBy: "Adviser" },
+    { id: "d2", name: "1st Interim Distribution Notice.pdf", category: "Distribution", date: "2025-12-16", size: "845 KB", uploadedBy: "Adviser" },
+    { id: "d3", name: "Annual Statement 2024.pdf", category: "Statement", date: "2025-02-01", size: "2.4 MB", uploadedBy: "Adviser" },
+    { id: "d4", name: "Investment Policy Statement.pdf", category: "Agreement", date: "2023-06-01", size: "560 KB", uploadedBy: "Adviser" },
+    { id: "d5", name: "Withdrawal Confirmation Feb 2024.pdf", category: "Withdrawal", date: "2024-02-16", size: "320 KB", uploadedBy: "Adviser" },
+    { id: "d6", name: "Withdrawal Confirmation Dec 2024.pdf", category: "Withdrawal", date: "2024-12-07", size: "318 KB", uploadedBy: "Adviser" },
+  ],
+};
 
 const DOC_CATEGORIES = ["All", "Valuation", "Distribution", "Statement", "Agreement", "Withdrawal"];
 
@@ -407,11 +395,11 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
   const searchResults = useMemo(() => {
     if (!search || search.length < 2) return [];
     const q = search.toLowerCase();
-    return clients.filter(c =>
-      (c.name && c.name.toLowerCase().includes(q)) ||
-      (c.id && c.id.toLowerCase().includes(q)) ||
-      (c.email && c.email.toLowerCase().includes(q)) ||
-      (c.primaryCode && c.primaryCode.toLowerCase().includes(q))
+    return clients.filter(cl =>
+      (cl.name && cl.name.toLowerCase().includes(q)) ||
+      (cl.id && cl.id.toLowerCase().includes(q)) ||
+      (cl.email && cl.email.toLowerCase().includes(q)) ||
+      (cl.primaryCode && cl.primaryCode.toLowerCase().includes(q))
     ).slice(0, 10);
   }, [search, clients]);
   const handleSelectClient = (id) => { setSearch(""); setSearchFocused(false); setSelectedClient(id); setSection("clients"); };
@@ -441,15 +429,15 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
         </div>
         {searchResults.length > 0 && (
           <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.white,border:"1px solid "+C.silver,borderRadius:8,boxShadow:"0 8px 24px rgba(0,0,0,0.12)",zIndex:100,marginTop:4,maxHeight:380,overflowY:"auto"}}>
-            {searchResults.map(cl => {
+            {searchResults.map((cl,i) => {
               const val = valuations[cl.id];
               const aum = val ? convertAmount(val.totalAssetValuation,"USD",selectedCcy) : null;
               const isActive = auth0Users && auth0Users.some(u => u.email === cl.email);
               return (
                 <div key={cl.id} onMouseDown={()=>handleSelectClient(cl.id)}
-                  style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",cursor:"pointer",borderBottom:"0.5px solid "+C.silver}}
+                  style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",cursor:"pointer",borderBottom:"0.5px solid "+C.silver,background:C.white}}
                   onMouseEnter={e=>e.currentTarget.style.background=C.tealLight}
-                  onMouseLeave={e=>e.currentTarget.style.background=""}>
+                  onMouseLeave={e=>e.currentTarget.style.background=C.white}>
                   <div style={{display:"flex",alignItems:"center",gap:12}}>
                     <div style={{width:34,height:34,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:11,fontWeight:700,flexShrink:0}}>
                       {cl.name ? cl.name.split(" ").map(n=>n[0]).join("").slice(0,2) : "?"}
@@ -462,7 +450,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
                   <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
                     {aum !== null && <div style={{fontSize:13,fontWeight:600,color:C.navy}}>{sym}{fmt(aum,0)}</div>}
                     {isActive && <Badge color="success">Active</Badge>}
-                    <span style={{color:C.teal,fontSize:12,fontWeight:600}}>View →</span>
+                    <span style={{color:C.teal,fontSize:12,fontWeight:600}}>View &rarr;</span>
                   </div>
                 </div>
               );
@@ -470,9 +458,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
           </div>
         )}
         {search.length >= 2 && searchResults.length === 0 && (
-          <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.white,border:"1px solid "+C.silver,borderRadius:8,padding:16,textAlign:"center",color:C.faint,fontSize:13,zIndex:100,marginTop:4}}>
-            No clients found
-          </div>
+          <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.white,border:"1px solid "+C.silver,borderRadius:8,padding:16,textAlign:"center",color:C.faint,fontSize:13,zIndex:100,marginTop:4}}>No clients found</div>
         )}
       </div>
 
@@ -515,8 +501,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
                 const liab = val ? convertAmount(val.totalLiabilities,"USD",selectedCcy) : 0;
                 const isActive = auth0Users && auth0Users.some(u => u.email === cl.email);
                 return (
-                  <tr key={cl.id}
-                    onClick={()=>{setSelectedClient(cl.id);setSection("clients");}}
+                  <tr key={cl.id} onClick={()=>{setSelectedClient(cl.id);setSection("clients");}}
                     style={{borderBottom:"0.5px solid "+C.silver,cursor:"pointer",background:i%2===0?C.white:"#FAFBFC"}}
                     onMouseEnter={e=>e.currentTarget.style.background=C.tealLight}
                     onMouseLeave={e=>e.currentTarget.style.background=i%2===0?C.white:"#FAFBFC"}>
@@ -545,12 +530,13 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
           </table>
         </div>
       </div>
+
     </div>
   );
 };
 
 // --- CLIENTS LIST ------------------------------------------------------------
-const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreviewClient, clients: propClients, valuations: propValuations, holdings: propHoldings, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, liveDocuments}) => {
+const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreviewClient, clients: propClients, valuations: propValuations, holdings: propHoldings, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, liveDocuments, clientDetailLoading}) => {
   const [search, setSearch] = useState("");
   const isMobile = useIsMobile();
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
@@ -558,7 +544,7 @@ const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreview
   const valuations = propValuations || VALUATIONS;
 
   if (selectedClient) {
-    return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} holdings={propHoldings} withdrawals={propWithdrawals} distributions={propDistributions} txns={propTxns} valuations={valuations} clients={clients} liveDocuments={liveDocuments}/>;
+    return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} holdings={propHoldings} withdrawals={propWithdrawals} distributions={propDistributions} txns={propTxns} valuations={valuations} clients={clients} liveDocuments={liveDocuments} clientDetailLoading={clientDetailLoading}/>;
   }
 
   const filtered = clients.filter(c =>
@@ -760,8 +746,6 @@ const DocumentsTab = ({clientId, isAdviser, liveDocuments}) => {
   ];
   const filtered = catFilter === "All" ? allDocs : allDocs.filter(d => d.category === catFilter);
 
-  if (!clientId) return null;
-
   const handleUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -790,7 +774,7 @@ const DocumentsTab = ({clientId, isAdviser, liveDocuments}) => {
   };
 
   return (
-    <div style={{width:"100%"}}>
+    <div>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:10}}>
         <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
           {DOC_CATEGORIES.map(cat=>(
@@ -887,7 +871,7 @@ const DocumentsTab = ({clientId, isAdviser, liveDocuments}) => {
         </div>
       )}
 
-      {isAdviser && allDocs.length > 0 && (
+      {isAdviser && docs.length > 0 && (
         <div style={{marginTop:16,padding:"12px 16px",background:C.silver,borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{fontSize:13,color:C.faint}}>{allDocs.length} document{allDocs.length!==1?"s":""} in vault</span>
           <button
@@ -909,7 +893,7 @@ const DocumentsTab = ({clientId, isAdviser, liveDocuments}) => {
 };
 
 // --- CLIENT PORTAL ----------------------------------------------------------
-const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: propHoldings, valuations: propValuations, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, liveDocuments, clients: propClients, previewClientObj}) => {
+const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: propHoldings, valuations: propValuations, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, liveDocuments}) => {
   const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
   const [search, setSearch] = useState("");
@@ -917,8 +901,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
 
   // Find client by Auth0 clientId claim or default to first client for demo
-  const clientsSource = propClients || CLIENTS;
-  const client = previewClientObj || clientsSource.find(c => c.id === user?.clientId) || clientsSource[0];
+  const client = CLIENTS.find(c => c.id === user?.clientId) || CLIENTS[0];
   const clientId = client?.id;
   const val = (propValuations || VALUATIONS)[clientId];
   const holdings = (propHoldings || HOLDINGS)[clientId] || [];
@@ -1174,11 +1157,6 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
             ))}
           </div>
         )}
-
-        {/* Documents Tab */}
-        {tab==="documents" && (
-          <DocumentsTab clientId={clientId} isAdviser={false} liveDocuments={liveDocuments}/>
-        )}
       </div>
     </div>
   );
@@ -1189,6 +1167,7 @@ export default function App() {
   const {user, loading: authLoading, error: authError, login, logout} = useAuth();
   const {data: liveData, loading: dataLoading, error: dataError, lastUpdated, refresh} = useOneDriveData();
   const {auth0Users} = useAuth0Users();
+  const {data: clientDetailData, loading: clientDetailLoading} = useClientDetailData(selectedClient || previewClient);
   const [section, setSection] = useState("dashboard");
   const [selectedClient, setSelectedClient] = useState(null);
   const [selectedCcy, setSelectedCcy] = useState("USD");
@@ -1198,11 +1177,11 @@ export default function App() {
   // Use live data if available, fall back to static
   const clients = (liveData && liveData.clients && liveData.clients.length > 0) ? liveData.clients : CLIENTS;
   const valuations = (liveData && liveData.valuations) ? liveData.valuations : VALUATIONS;
-  const holdings = (liveData && liveData.holdings) ? liveData.holdings : HOLDINGS;
-  const withdrawals = (liveData && liveData.withdrawals) ? liveData.withdrawals : WITHDRAWALS;
-  const distributions = (liveData && liveData.distributions) ? liveData.distributions : DISTRIBUTIONS;
-  const txns = (liveData && liveData.txns && liveData.txns.length > 0) ? liveData.txns : TXNS;
-  const liveDocuments = (liveData && liveData.documents) ? liveData.documents : {};
+  const holdings = (clientDetailData&&clientDetailData.holdings) ? clientDetailData.holdings : HOLDINGS;
+  const withdrawals = (clientDetailData&&clientDetailData.withdrawals) ? clientDetailData.withdrawals : WITHDRAWALS;
+  const distributions = (clientDetailData&&clientDetailData.distributions) ? clientDetailData.distributions : DISTRIBUTIONS;
+  const txns = (clientDetailData&&clientDetailData.txns&&clientDetailData.txns.length>0) ? clientDetailData.txns : TXNS;
+  const liveDocuments = (clientDetailData&&clientDetailData.documents) ? clientDetailData.documents : {};
   const loading = authLoading;
   const error = authError;
 
@@ -1228,17 +1207,17 @@ export default function App() {
   if (!user) return <LoginScreen onLogin={login} loading={loading} error={error}/>;
 
   // Adviser previewing client view
-  if (previewClient) { const previewClientObj = clients.find(c=>c.id===previewClient); return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} isPreview={true} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments} clients={clients} previewClientObj={previewClientObj}/>; }
+  if (previewClient) return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} isPreview={true} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>;
 
   // Client role - show client portal only
-  if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments} clients={clients}/>;
+  if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>;
 
   return (
     <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       <Nav section={section} setSection={handleSection} selectedCcy={selectedCcy} setCcy={setSelectedCcy} user={user} logout={logout}/>
       <div style={{flex:1,overflowY:"auto",paddingBottom:isMobile?68:0}}>
         {section==="dashboard" && <Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} clients={clients} valuations={valuations} lastUpdated={lastUpdated} dataError={dataError} onRefresh={refresh} auth0Users={auth0Users}/>}
-        {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} clients={clients} valuations={valuations} holdings={holdings} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>}
+        {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} clients={clients} valuations={valuations} holdings={holdings} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments} clientDetailLoading={clientDetailLoading}/>}
         {section==="withdrawals" && <WithdrawalsPage selectedCcy={selectedCcy} withdrawals={withdrawals} clients={clients}/>}
         {section==="connect" && <Connect/>}
       </div>
