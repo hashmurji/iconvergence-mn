@@ -1126,7 +1126,7 @@ const DocumentsTab = ({clientId, isAdviser, liveDocuments}) => {
         </div>
       )}
 
-      {isAdviser && docs.length > 0 && (
+      {isAdviser && allDocs.length > 0 && (
         <div style={{marginTop:16,padding:"12px 16px",background:C.silver,borderRadius:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
           <span style={{fontSize:13,color:C.faint}}>{allDocs.length} document{allDocs.length!==1?"s":""} in vault</span>
           <button
