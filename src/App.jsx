@@ -518,6 +518,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
   const distributions = (detailData&&detailData.distributions) ? detailData.distributions[clientId]||[] : (propDistributions||DISTRIBUTIONS)[clientId]||[];
   const allTxns = (detailData&&detailData.txns&&detailData.txns.length>0) ? detailData.txns : (propTxns||TXNS);
   const txns = allTxns.filter(t => t.clientId === clientId);
+  const resolvedDocuments = (detailData&&detailData.documents) ? detailData.documents : (liveDocuments||{});
 
   const filteredTxns = useMemo(() => {
     let d = txns;
@@ -745,7 +746,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
       )}
 
       {tab==="documents" && (
-        <DocumentsTab clientId={clientId} isAdviser={true} liveDocuments={liveDocuments}/>
+        <DocumentsTab clientId={clientId} isAdviser={true} liveDocuments={resolvedDocuments}/>
       )}
 
       {tab==="crm" && (
@@ -1163,6 +1164,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
   const distributions = (detailData&&detailData.distributions) ? detailData.distributions[clientId]||[] : (propDistributions||DISTRIBUTIONS)[clientId]||[];
   const allTxns = (detailData&&detailData.txns&&detailData.txns.length>0) ? detailData.txns : (propTxns||TXNS);
   const txns = allTxns.filter(t => t.clientId === clientId);
+  const resolvedDocuments = (detailData&&detailData.documents) ? detailData.documents : (liveDocuments||{});
 
   const filteredTxns = useMemo(() => {
     let d = txns;
