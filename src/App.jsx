@@ -1226,11 +1226,11 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
             <div style={{display:"flex",gap:isMobile?12:20,flexWrap:"wrap"}}>
               <div style={{textAlign:"right"}}>
                 <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Portfolio Value</div>
-                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{sym}{fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),0)}</div>
+                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{sym}{fmt(convertAmount(val.totalAssetValuation, client.reportingCcy||"USD", selectedCcy),0)}</div>
               </div>
               <div style={{textAlign:"right"}}>
                 <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Cash</div>
-                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.teal}}>{sym}{fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),0)}</div>
+                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.teal}}>{sym}{fmt(convertAmount(val.totalCashBalance, client.reportingCcy||"USD", selectedCcy),0)}</div>
               </div>
             </div>
           )}
@@ -1240,10 +1240,10 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
         {val && (
           <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:10,marginBottom:18}}>
             {[
-              {label:"Total Valuation", value:sym+fmt(convertAmount(val.totalValuationNotice,"USD",selectedCcy),0), color:C.navy},
-              {label:"Asset Value", value:sym+fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),0), color:C.navy},
-              {label:"Cash Balance", value:sym+fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),0), color:C.green},
-              {label:"Liabilities", value:sym+fmt(convertAmount(val.totalLiabilities,"USD",selectedCcy),0), color:C.red},
+              {label:"Total Valuation", value:sym+fmt(convertAmount(val.totalValuationNotice,client.reportingCcy||"USD",selectedCcy),0), color:C.navy},
+              {label:"Asset Value", value:sym+fmt(convertAmount(val.totalAssetValuation, client.reportingCcy||"USD", selectedCcy),0), color:C.navy},
+              {label:"Cash Balance", value:sym+fmt(convertAmount(val.totalCashBalance, client.reportingCcy||"USD", selectedCcy),0), color:C.green},
+              {label:"Liabilities", value:sym+fmt(convertAmount(val.totalLiabilities,client.reportingCcy||"USD",selectedCcy),0), color:C.red},
             ].map(card=>(
               <div key={card.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"14px 16px"}}>
                 <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:C.faint,marginBottom:6}}>{card.label}</div>
@@ -1266,16 +1266,16 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
         {tab==="valuation" && val && (
           <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(2,1fr)",gap:12}}>
             {[
-              {label:"Total Valuation Notice", value:sym+fmt(convertAmount(val.totalValuationNotice,"USD",selectedCcy),2)},
-              {label:"Total Brite Assets", value:sym+fmt(convertAmount(val.totalBriteAssets,"USD",selectedCcy),2)},
+              {label:"Total Valuation Notice", value:sym+fmt(convertAmount(val.totalValuationNotice,client.reportingCcy||"USD",selectedCcy),2)},
+              {label:"Total Brite Assets", value:sym+fmt(convertAmount(val.totalBriteAssets,client.reportingCcy||"USD",selectedCcy),2)},
               {label:"Total Asset Valuation", value:sym+fmt(convertAmount(val.totalAssetValuation, client.reportingCcy||"USD", selectedCcy),2)},
-              {label:"Total Cash Balance", value:sym+fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),2)},
-              {label:"Pension Valuation", value:sym+fmt(convertAmount(val.pensionValuation,"USD",selectedCcy),2)},
-              {label:"Pension Cash Balance", value:sym+fmt(convertAmount(val.pensionCash,"USD",selectedCcy),2)},
-              {label:"Direct Investment Cash", value:sym+fmt(convertAmount(val.directInvestmentCash,"USD",selectedCcy),2)},
-              {label:"Direct Investment Assets", value:sym+fmt(convertAmount(val.directInvestmentAssets,"USD",selectedCcy),2)},
-              {label:"Total Liabilities", value:sym+fmt(convertAmount(val.totalLiabilities,"USD",selectedCcy),2), red:true},
-              {label:"Surrender Rebate Payable", value:sym+fmt(convertAmount(val.surrenderRebatePayable,"USD",selectedCcy),2), red:true},
+              {label:"Total Cash Balance", value:sym+fmt(convertAmount(val.totalCashBalance, client.reportingCcy||"USD", selectedCcy),2)},
+              {label:"Pension Valuation", value:sym+fmt(convertAmount(val.pensionValuation,client.reportingCcy||"USD",selectedCcy),2)},
+              {label:"Pension Cash Balance", value:sym+fmt(convertAmount(val.pensionCash,client.reportingCcy||"USD",selectedCcy),2)},
+              {label:"Direct Investment Cash", value:sym+fmt(convertAmount(val.directInvestmentCash,client.reportingCcy||"USD",selectedCcy),2)},
+              {label:"Direct Investment Assets", value:sym+fmt(convertAmount(val.directInvestmentAssets,client.reportingCcy||"USD",selectedCcy),2)},
+              {label:"Total Liabilities", value:sym+fmt(convertAmount(val.totalLiabilities,client.reportingCcy||"USD",selectedCcy),2), red:true},
+              {label:"Surrender Rebate Payable", value:sym+fmt(convertAmount(val.surrenderRebatePayable,client.reportingCcy||"USD",selectedCcy),2), red:true},
             ].map(row=>(
               <div key={row.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div style={{fontSize:13,color:C.faint}}>{row.label}</div>
