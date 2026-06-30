@@ -557,15 +557,15 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
           <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
             <div style={{textAlign:"right"}}>
               <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Asset Valuation</div>
-              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.white}}>{sym}{fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),0)}</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.white}}>{sym}{fmt(convertAmount(val.totalAssetValuation, client.reportingCcy||"USD", selectedCcy),0)}</div>
             </div>
             <div style={{textAlign:"right"}}>
               <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Cash</div>
-              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.teal}}>{sym}{fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),0)}</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.teal}}>{sym}{fmt(convertAmount(val.totalCashBalance, client.reportingCcy||"USD", selectedCcy),0)}</div>
             </div>
             <div style={{textAlign:"right"}}>
               <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Liabilities</div>
-              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.red}}>{sym}{fmt(convertAmount(val.totalLiabilities,"USD",selectedCcy),0)}</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.red}}>{sym}{fmt(convertAmount(val.totalLiabilities, client.reportingCcy||"USD", selectedCcy),0)}</div>
             </div>
           </div>
         )}
@@ -1165,6 +1165,15 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
 
   // Find client by Auth0 clientId claim or default to first client for demo
+  const clientsSourceP0 = propClients || CLIENTS;
+  const clientId0 = (clientsSourceP0.find(c => c.id === user?.clientId) || clientsSourceP0[0])?.id;
+  const [detailData, setDetailData] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  useEffect(() => {
+    if (!clientId0) return;
+    setDetailLoading(true); setDetailData(null);
+    fetch("/api/clientdetail?clientId="+clientId0).then(r=>r.json()).then(d=>{ if(!d.error) setDetailData(d); }).catch(()=>{}).finally(()=>setDetailLoading(false));
+  }, [clientId0]);
   const clientsSourceP = propClients || CLIENTS;
   const client = clientsSourceP.find(c => c.id === user?.clientId) || clientsSourceP[0];
   const clientId = client?.id;
@@ -1259,7 +1268,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
             {[
               {label:"Total Valuation Notice", value:sym+fmt(convertAmount(val.totalValuationNotice,"USD",selectedCcy),2)},
               {label:"Total Brite Assets", value:sym+fmt(convertAmount(val.totalBriteAssets,"USD",selectedCcy),2)},
-              {label:"Total Asset Valuation", value:sym+fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),2)},
+              {label:"Total Asset Valuation", value:sym+fmt(convertAmount(val.totalAssetValuation, client.reportingCcy||"USD", selectedCcy),2)},
               {label:"Total Cash Balance", value:sym+fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),2)},
               {label:"Pension Valuation", value:sym+fmt(convertAmount(val.pensionValuation,"USD",selectedCcy),2)},
               {label:"Pension Cash Balance", value:sym+fmt(convertAmount(val.pensionCash,"USD",selectedCcy),2)},
