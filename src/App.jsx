@@ -582,20 +582,22 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
       {tab==="valuation" && val && (
         <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(2,1fr)",gap:12}}>
           <div style={{gridColumn:"1 / -1",fontSize:12,color:C.faint,marginBottom:-4,display:"flex",alignItems:"center",gap:6}}>
-            <span>Reported in</span>
-            <Badge color="navy">{val.reportingCcy || "USD"}</Badge>
+            <span>Source values reported in</span>
+            <Badge color="navy">{client.reportingCcy || "USD"}</Badge>
+            <span>· Showing in</span>
+            <Badge color="info">{selectedCcy}</Badge>
           </div>
           {[
-            {label:"Total Valuation Notice", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.totalValuationNotice,2)},
-            {label:"Total Brite Assets", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.totalBriteAssets,2)},
-            {label:"Total Asset Valuation", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.totalAssetValuation,2)},
-            {label:"Total Cash Balance", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.totalCashBalance,2)},
-            {label:"Pension Valuation", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.pensionValuation,2)},
-            {label:"Pension Cash Balance", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.pensionCash,2)},
-            {label:"Direct Investment Cash", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.directInvestmentCash,2)},
-            {label:"Direct Investment Assets", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.directInvestmentAssets,2)},
-            {label:"Total Liabilities", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.totalLiabilities,2), red:true},
-            {label:"Surrender Rebate Payable", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.surrenderRebatePayable,2), red:true},
+            {label:"Total Valuation Notice", value:sym+fmt(convertAmount(val.totalValuationNotice, client.reportingCcy||"USD", selectedCcy),2)},
+            {label:"Total Brite Assets", value:sym+fmt(convertAmount(val.totalBriteAssets, client.reportingCcy||"USD", selectedCcy),2)},
+            {label:"Total Asset Valuation", value:sym+fmt(convertAmount(val.totalAssetValuation, client.reportingCcy||"USD", selectedCcy),2)},
+            {label:"Total Cash Balance", value:sym+fmt(convertAmount(val.totalCashBalance, client.reportingCcy||"USD", selectedCcy),2)},
+            {label:"Pension Valuation", value:sym+fmt(convertAmount(val.pensionValuation, client.reportingCcy||"USD", selectedCcy),2)},
+            {label:"Pension Cash Balance", value:sym+fmt(convertAmount(val.pensionCash, client.reportingCcy||"USD", selectedCcy),2)},
+            {label:"Direct Investment Cash", value:sym+fmt(convertAmount(val.directInvestmentCash, client.reportingCcy||"USD", selectedCcy),2)},
+            {label:"Direct Investment Assets", value:sym+fmt(convertAmount(val.directInvestmentAssets, client.reportingCcy||"USD", selectedCcy),2)},
+            {label:"Total Liabilities", value:sym+fmt(convertAmount(val.totalLiabilities, client.reportingCcy||"USD", selectedCcy),2), red:true},
+            {label:"Surrender Rebate Payable", value:sym+fmt(convertAmount(val.surrenderRebatePayable, client.reportingCcy||"USD", selectedCcy),2), red:true},
           ].map(row=>(
             <div key={row.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{fontSize:13,color:C.faint}}>{row.label}</div>
@@ -1155,7 +1157,7 @@ const DocumentsTab = ({clientId, isAdviser, liveDocuments}) => {
 };
 
 // --- CLIENT PORTAL ----------------------------------------------------------
-const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: propHoldings, valuations: propValuations, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, liveDocuments}) => {
+const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: propHoldings, valuations: propValuations, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, liveDocuments, clients: propClients}) => {
   const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
   const [search, setSearch] = useState("");
@@ -1163,7 +1165,8 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
 
   // Find client by Auth0 clientId claim or default to first client for demo
-  const client = CLIENTS.find(c => c.id === user?.clientId) || CLIENTS[0];
+  const clientsSourceP = propClients || CLIENTS;
+  const client = clientsSourceP.find(c => c.id === user?.clientId) || clientsSourceP[0];
   const clientId = client?.id;
   const val = (propValuations || VALUATIONS)[clientId];
   const holdings = (detailData&&detailData.holdings) ? detailData.holdings[clientId]||[] : (propHoldings||HOLDINGS)[clientId]||[];
@@ -1471,10 +1474,10 @@ export default function App() {
   if (!user) return <LoginScreen onLogin={login} loading={loading} error={error}/>;
 
   // Adviser previewing client view
-  if (previewClient) return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} isPreview={true} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>;
+  if (previewClient) return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} isPreview={true} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments} clients={clients}/>;
 
   // Client role - show client portal only
-  if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>;
+  if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments} clients={clients}/>;
 
   return (
     <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
