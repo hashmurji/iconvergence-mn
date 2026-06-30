@@ -89,6 +89,7 @@ export default async function handler(req, res) {
     const valRow = valuationsAll.find(r => r["Client Number"] === clientId);
     const valuations = valRow ? {
       [clientId]: {
+        reportingCcy: valRow["Reporting CCY"] || valRow["reporting ccy"] || "USD",
         totalValuationNotice: parseFloat(valRow["Total Valuation Notice"]) || 0,
         totalBriteAssets: parseFloat(valRow["Total Brite Assets"]) || 0,
         totalAssetValuation: parseFloat(valRow["Total Asset Valuation"]) || 0,
@@ -106,7 +107,11 @@ export default async function handler(req, res) {
     const holdings = {
       [clientId]: holdingsAll.filter(r => r["Client Number"] === clientId).map(r => ({
         name: r["Holding Name"] || "", purchasePrice: r["Purchase Price"] || "",
-        marketValue: r["Market Value"] || "", gainLoss: r["Gain/Loss"] || "",
+        purchasePriceCcy: r["Purchase Price Currency"] || "",
+        marketValue: r["Market Value"] || "",
+        marketValueCcy: r["Market Value Currency"] || "",
+        gainLoss: r["Gain/Loss"] || "",
+        gainLossCcy: r["Gain/Loss Currency"] || "",
         pctChange: parseFloat(r["Percent Change"]) || 0,
         account: r["Financial Account"] || "", shares: parseFloat(r["Shares"]) || 0,
       }))

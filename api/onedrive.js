@@ -147,6 +147,7 @@ function buildValuations(rows) {
     const id = r["Client Number"];
     if (!id) continue;
     result[id] = {
+      reportingCcy: r["Reporting CCY"] || r["reporting ccy"] || "USD",
       totalValuationNotice: parseFloat(r["Total Valuation Notice"]) || 0,
       totalBriteAssets: parseFloat(r["Total Brite Assets"]) || 0,
       totalAssetValuation: parseFloat(r["Total Asset Valuation"]) || 0,
@@ -171,8 +172,11 @@ function buildHoldings(rows) {
     result[id].push({
       name: r["Holding Name"] || "",
       purchasePrice: r["Purchase Price"] || "",
+      purchasePriceCcy: r["Purchase Price Currency"] || "",
       marketValue: r["Market Value"] || "",
+      marketValueCcy: r["Market Value Currency"] || "",
       gainLoss: r["Gain/Loss"] || "",
+      gainLossCcy: r["Gain/Loss Currency"] || "",
       pctChange: parseFloat(r["Percent Change"]) || 0,
       account: r["Financial Account"] || "",
       shares: parseFloat(r["Shares"]) || 0,

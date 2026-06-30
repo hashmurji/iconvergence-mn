@@ -53,6 +53,7 @@ export default async function handler(req, res) {
       const id = r["Client Number"];
       if (!id) continue;
       valuations[id] = {
+        reportingCcy: r["Reporting CCY"] || r["reporting ccy"] || "USD",
         totalValuationNotice: parseFloat(r["Total Valuation Notice"]) || 0,
         totalBriteAssets: parseFloat(r["Total Brite Assets"]) || 0,
         totalAssetValuation: parseFloat(r["Total Asset Valuation"]) || 0,

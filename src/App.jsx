@@ -581,17 +581,21 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
 
       {tab==="valuation" && val && (
         <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(2,1fr)",gap:12}}>
+          <div style={{gridColumn:"1 / -1",fontSize:12,color:C.faint,marginBottom:-4,display:"flex",alignItems:"center",gap:6}}>
+            <span>Reported in</span>
+            <Badge color="navy">{val.reportingCcy || "USD"}</Badge>
+          </div>
           {[
-            {label:"Total Valuation Notice", value:sym+fmt(convertAmount(val.totalValuationNotice,"USD",selectedCcy),2)},
-            {label:"Total Brite Assets", value:sym+fmt(convertAmount(val.totalBriteAssets,"USD",selectedCcy),2)},
-            {label:"Total Asset Valuation", value:sym+fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),2)},
-            {label:"Total Cash Balance", value:sym+fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),2)},
-            {label:"Pension Valuation", value:sym+fmt(convertAmount(val.pensionValuation,"USD",selectedCcy),2)},
-            {label:"Pension Cash Balance", value:sym+fmt(convertAmount(val.pensionCash,"USD",selectedCcy),2)},
-            {label:"Direct Investment Cash", value:sym+fmt(convertAmount(val.directInvestmentCash,"USD",selectedCcy),2)},
-            {label:"Direct Investment Assets", value:sym+fmt(convertAmount(val.directInvestmentAssets,"USD",selectedCcy),2)},
-            {label:"Total Liabilities", value:sym+fmt(convertAmount(val.totalLiabilities,"USD",selectedCcy),2), red:true},
-            {label:"Surrender Rebate Payable", value:sym+fmt(convertAmount(val.surrenderRebatePayable,"USD",selectedCcy),2), red:true},
+            {label:"Total Valuation Notice", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.totalValuationNotice,2)},
+            {label:"Total Brite Assets", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.totalBriteAssets,2)},
+            {label:"Total Asset Valuation", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.totalAssetValuation,2)},
+            {label:"Total Cash Balance", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.totalCashBalance,2)},
+            {label:"Pension Valuation", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.pensionValuation,2)},
+            {label:"Pension Cash Balance", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.pensionCash,2)},
+            {label:"Direct Investment Cash", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.directInvestmentCash,2)},
+            {label:"Direct Investment Assets", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.directInvestmentAssets,2)},
+            {label:"Total Liabilities", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.totalLiabilities,2), red:true},
+            {label:"Surrender Rebate Payable", value:(CCY_SYMBOLS[val.reportingCcy]||val.reportingCcy+" ")+fmt(val.surrenderRebatePayable,2), red:true},
           ].map(row=>(
             <div key={row.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{fontSize:13,color:C.faint}}>{row.label}</div>
@@ -603,10 +607,10 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
 
       {tab==="holdings" && (
         <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:700}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:820}}>
             <thead>
               <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
-                {["Holding","Account","Shares","Purchase Price","Market Value","Gain / Loss","% Change"].map(h=>(
+                {["Holding","Account","Shares","Purchase Price","CCY","Market Value","CCY","Gain / Loss","CCY","% Change"].map(h=>(
                   <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
                 ))}
               </tr>
@@ -618,8 +622,11 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
                   <td style={{padding:"10px 12px",color:C.faint,fontSize:11}}>{h.account}</td>
                   <td style={{padding:"10px 12px",color:C.text}}>{h.shares.toLocaleString()}</td>
                   <td style={{padding:"10px 12px",color:C.text}}>{h.purchasePrice}</td>
+                  <td style={{padding:"10px 12px",color:C.faint,fontSize:11}}>{h.purchasePriceCcy||""}</td>
                   <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>{h.marketValue}</td>
+                  <td style={{padding:"10px 12px",color:C.faint,fontSize:11}}>{h.marketValueCcy||""}</td>
                   <td style={{padding:"10px 12px",color:posColor(h.pctChange)}}>{h.gainLoss}</td>
+                  <td style={{padding:"10px 12px",color:C.faint,fontSize:11}}>{h.gainLossCcy||""}</td>
                   <td style={{padding:"10px 12px"}}>
                     <span style={{background:posBg(h.pctChange),color:posColor(h.pctChange),fontSize:11,fontWeight:600,padding:"2px 7px",borderRadius:100}}>{pct(h.pctChange)}</span>
                   </td>
@@ -1269,10 +1276,10 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
         {/* Holdings Tab */}
         {tab==="holdings" && (
           <div style={{overflowX:"auto"}}>
-            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:isMobile?600:700}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:isMobile?700:820}}>
               <thead>
                 <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
-                  {["Holding","Account","Shares","Purchase Price","Market Value","Gain / Loss","% Change"].map(h=>(
+                  {["Holding","Account","Shares","Purchase Price","CCY","Market Value","CCY","Gain / Loss","CCY","% Change"].map(h=>(
                     <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
                   ))}
                 </tr>
@@ -1284,8 +1291,11 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
                     <td style={{padding:"10px 12px",color:C.faint,fontSize:11}}>{h.account}</td>
                     <td style={{padding:"10px 12px",color:C.text}}>{h.shares.toLocaleString()}</td>
                     <td style={{padding:"10px 12px",color:C.text}}>{h.purchasePrice}</td>
+                    <td style={{padding:"10px 12px",color:C.faint,fontSize:11}}>{h.purchasePriceCcy||""}</td>
                     <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>{h.marketValue}</td>
+                    <td style={{padding:"10px 12px",color:C.faint,fontSize:11}}>{h.marketValueCcy||""}</td>
                     <td style={{padding:"10px 12px",color:posColor(h.pctChange)}}>{h.gainLoss}</td>
+                    <td style={{padding:"10px 12px",color:C.faint,fontSize:11}}>{h.gainLossCcy||""}</td>
                     <td style={{padding:"10px 12px"}}>
                       <span style={{background:posBg(h.pctChange),color:posColor(h.pctChange),fontSize:11,fontWeight:600,padding:"2px 7px",borderRadius:100}}>{pct(h.pctChange)}</span>
                     </td>
