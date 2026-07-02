@@ -977,9 +977,8 @@ const Connect = () => {
 const LoginScreen = ({onLogin, loading, error}) => (
   <div style={{minHeight:"100vh",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
     <div style={{background:C.navyMid,borderRadius:16,padding:40,width:380,maxWidth:"100%",textAlign:"center",border:"0.5px solid rgba(0,184,176,0.2)"}}>
-      <div style={{display:"flex",alignItems:"center",gap:12,justifyContent:"center",marginBottom:8}}>
-        <img src="/ubiquity-logo.png" alt="Ubiquity" style={{height:80,width:"auto",marginBottom:4}}/>
-      </div>
+      <img src="/ubiquity-mark.png" alt="Ubiquity" style={{height:72,width:"auto",marginBottom:16,filter:"brightness(0) invert(1)"}}/>
+      <div style={{fontFamily:"Inter,sans-serif",fontSize:24,fontWeight:700,color:C.white,marginBottom:8,letterSpacing:-0.5}}>Ubiquity</div>
       <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",marginBottom:32}}>Connected insight. Unified oversight.</div>
       {error && <div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#FCA5A5"}}>{error}</div>}
       <button onClick={onLogin} disabled={loading} style={{width:"100%",background:C.teal,color:C.white,border:"none",borderRadius:8,padding:"13px 20px",fontSize:15,fontWeight:600,cursor:loading?"not-allowed":"pointer",fontFamily:"Inter,sans-serif",opacity:loading?0.7:1}}>
