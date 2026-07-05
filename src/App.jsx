@@ -79,7 +79,7 @@ const useAuth = () => {
     const state = generateCodeVerifier();
     sessionStorage.setItem("auth0_verifier", verifier);
     sessionStorage.setItem("auth0_state", state);
-    const params = new URLSearchParams({ response_type: "code", client_id: AUTH0_CLIENT_ID, redirect_uri: AUTH0_REDIRECT_URI, scope: "openid profile email", state, code_challenge: challenge, code_challenge_method: "S256" });
+    const params = new URLSearchParams({ response_type: "code", client_id: AUTH0_CLIENT_ID, redirect_uri: AUTH0_REDIRECT_URI, scope: "openid profile email", audience: "https://api.ubiquiti.co.uk", state, code_challenge: challenge, code_challenge_method: "S256" });
     window.location.href = "https://"+AUTH0_DOMAIN+"/authorize?"+params.toString();
   };
   const logout = () => {
@@ -101,7 +101,15 @@ const useIsMobile = () => {
 };
 
 
-// --- ONEDRIVE DATA HOOK ------------------------------------------------------
+// --- LIVE DATA HOOK (AWS-backed) ---------------------------------------------
+const getStoredAccessToken = () => {
+  try {
+    const s = sessionStorage.getItem("mn_auth");
+    const parsed = s ? JSON.parse(s) : null;
+    return parsed ? parsed.accessToken : null;
+  } catch (e) { return null; }
+};
+
 const useOneDriveData = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -113,15 +121,34 @@ const useOneDriveData = () => {
     setError(null);
     try {
       const bust = forceRefresh ? '?t='+Date.now() : '';
-      const [cr, vr] = await Promise.all([fetch("/api/clients"+bust), fetch("/api/valuations"+bust)]);
-      const cj = await cr.json();
-      const vj = await vr.json();
+      const authHeader = { Authorization: "Bearer " + (getStoredAccessToken() || "") };
+      const [cr, vr, hr, wr, dr, tr, docr] = await Promise.all([
+        fetch("/api/clients"+bust, { headers: authHeader }),
+        fetch("/api/valuations"+bust, { headers: authHeader }),
+        fetch("/api/holdings"+bust, { headers: authHeader }),
+        fetch("/api/withdrawals"+bust, { headers: authHeader }),
+        fetch("/api/distributions"+bust, { headers: authHeader }),
+        fetch("/api/transactions"+bust, { headers: authHeader }),
+        fetch("/api/documents"+bust, { headers: authHeader }),
+      ]);
+      const [cj, vj, hj, wj, dj, tj, docj] = await Promise.all([
+        cr.json(), vr.json(), hr.json(), wr.json(), dr.json(), tr.json(), docr.json()
+      ]);
       if (cj.error) throw new Error(cj.error);
-      const json = { clients: cj.clients, valuations: vj.valuations||{}, holdings: {}, withdrawals: {}, distributions: {}, txns: [], documents: {}, lastUpdated: cj.lastUpdated };
+      const json = {
+        clients: cj.clients,
+        valuations: vj.valuations || {},
+        holdings: hj.holdings || {},
+        withdrawals: wj.withdrawals || {},
+        distributions: dj.distributions || {},
+        txns: tj.txns || [],
+        documents: docj.documents || {},
+        lastUpdated: cj.lastUpdated,
+      };
       setData(json);
       setLastUpdated(cj.lastUpdated);
     } catch (err) {
-      console.error("OneDrive fetch error:", err);
+      console.error("Data fetch error:", err);
       setError(err.message);
       // Fall back to static data if API fails
       setData(null);
@@ -137,14 +164,13 @@ const useOneDriveData = () => {
 
 // --- BRAND -------------------------------------------------------------------
 const C = {
-  navy: "#061B33", navyMid: "#092D4A", navyLight: "#0D3D5E",
-  teal: "#10C6C1", tealLight: "#DDFBFA",
-  silver: "#EFF7FB", silverMid: "#AAB6C5",
-  white: "#FFFFFF", text: "#061B33", faint: "#5B6B84",
-  green: "#22C58B", greenBg: "#D1FAE5",
-  red: "#FF5A5F", redBg: "#FFE4E4",
-  amber: "#F5A623", amberBg: "#FEF3C7",
-  blue: "#1D7DFF", blueLight: "#EFF7FB",
+  navy: "#0D1B2E", navyMid: "#162840", navyLight: "#1E3A5F",
+  teal: "#00B8B0", tealLight: "#E6F9F8",
+  silver: "#EFF2F6", silverMid: "#C4CDD8",
+  white: "#FFFFFF", text: "#2D3748", faint: "#8A9AB0",
+  green: "#10B981", greenBg: "#D1FAE5",
+  red: "#EF4444", redBg: "#FEE2E2",
+  amber: "#F59E0B", amberBg: "#FEF3C7",
   gold: "#F5A623", goldLight: "#FEF5E7",
 };
 
@@ -289,7 +315,7 @@ const Modal = ({title, onClose, children}) => (
   <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.55)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
     <div style={{background:C.white,borderRadius:12,padding:28,width:560,maxWidth:"97vw",maxHeight:"90vh",overflowY:"auto"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-        <div style={{fontFamily:"Inter,sans-serif",fontSize:18,fontWeight:600,color:C.navy}}>{title}</div>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:18,fontWeight:600,color:C.navy}}>{title}</div>
         <button onClick={onClose} style={{background:"none",border:"none",fontSize:22,cursor:"pointer",color:C.faint,lineHeight:1}}>x</button>
       </div>
       {children}
@@ -322,9 +348,8 @@ const Nav = ({section, setSection, selectedCcy, setCcy, user, logout}) => {
   return (
     <>
       <div style={{background:C.navy,display:"flex",alignItems:"center",padding:"0 16px",height:54,position:"sticky",top:0,zIndex:200,flexShrink:0,borderBottom:"1px solid rgba(0,184,176,0.15)"}}>
-        <div onClick={()=>handleNav("dashboard")} style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?16:20,fontWeight:700,color:C.white,marginRight:isMobile?10:24,flexShrink:0,cursor:"pointer",letterSpacing:-0.5,display:"flex",alignItems:"center",gap:8}}>
-          <img src="/ubiquity-mark.png" alt="Ubiquity" style={{height:28,width:"auto"}}/>
-          <span style={{color:C.white}}>Ubiquity</span>
+        <div onClick={()=>handleNav("dashboard")} style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?16:20,fontWeight:700,color:C.white,marginRight:isMobile?10:24,flexShrink:0,cursor:"pointer"}}>
+          <span style={{color:C.teal}}>i-</span>Convergence
         </div>
         {!isMobile && items.filter(i=>i.key!=="users" || (user&&user.isAdviser)).map(i=>(
           <button key={i.key} onClick={()=>handleNav(i.key)} style={{background:"none",border:"none",color:section===i.key?C.teal:"rgba(255,255,255,0.5)",fontSize:12,fontWeight:section===i.key?600:400,cursor:"pointer",padding:"0 9px",height:"100%",borderBottom:section===i.key?"2px solid "+C.teal:"2px solid transparent",transition:"all 0.15s",whiteSpace:"nowrap",fontFamily:"'Inter',sans-serif"}}>
@@ -393,7 +418,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
       <div style={{marginBottom:18,display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:10}}>
         <div>
           <div style={{fontSize:10,fontWeight:600,letterSpacing:3,textTransform:"uppercase",color:C.teal,marginBottom:3}}>Platform overview</div>
-          <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?20:26,fontWeight:700,color:C.navy,letterSpacing:-0.5}}>Aggregate Dashboard</div>
+          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?20:26,fontWeight:700,color:C.navy}}>Aggregate Dashboard</div>
           {lastUpdated && <div style={{fontSize:11,color:C.faint,marginTop:3}}>Last synced: {new Date(lastUpdated).toLocaleString()}</div>}
           {dataError && <div style={{fontSize:11,color:C.red,marginTop:3}}>Data error: {dataError} — showing cached data</div>}
         </div>
@@ -444,7 +469,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
       <div style={{background:C.navy,borderRadius:12,padding:isMobile?"16px":24,marginBottom:14,display:"flex",flexWrap:"wrap",gap:16,justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
           <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:5}}>Total AUM ({selectedCcy})</div>
-          <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?28:36,fontWeight:700,color:C.white,letterSpacing:-1}}>{sym}{fmt(totalAUM,0)}</div>
+          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?28:36,fontWeight:700,color:C.white,letterSpacing:-1}}>{sym}{fmt(totalAUM,0)}</div>
           <div style={{fontSize:12,color:"rgba(255,255,255,0.5)",marginTop:4}}>Net of {sym}{fmt(totalLiabilities,0)} liabilities</div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -456,7 +481,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
           ].map(s=>(
             <div key={s.label} style={{background:C.navyMid,border:"0.5px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"12px 14px"}}>
               <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:4}}>{s.label}</div>
-              <div style={{fontFamily:"Inter,sans-serif",fontSize:18,fontWeight:600,color:C.white}}>{s.value}</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:18,fontWeight:600,color:C.white}}>{s.value}</div>
             </div>
           ))}
         </div>
@@ -551,7 +576,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
             {client.name.split(" ").map(n=>n[0]).join("")}
           </div>
           <div>
-            <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{client.name}</div>
+            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{client.name}</div>
             <div style={{fontSize:12,color:"rgba(255,255,255,0.5)"}}>{client.primaryCode} · {client.reportingCcy} · {client.jurisdiction}</div>
           </div>
         </div>
@@ -559,15 +584,15 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
           <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
             <div style={{textAlign:"right"}}>
               <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Asset Valuation</div>
-              <div style={{fontFamily:"Inter,sans-serif",fontSize:20,fontWeight:700,color:C.white}}>{sym}{fmt(convertAmount(val.totalAssetValuation, client.reportingCcy||"USD", selectedCcy),0)}</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.white}}>{sym}{fmt(convertAmount(val.totalAssetValuation, client.reportingCcy||"USD", selectedCcy),0)}</div>
             </div>
             <div style={{textAlign:"right"}}>
               <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Cash</div>
-              <div style={{fontFamily:"Inter,sans-serif",fontSize:20,fontWeight:700,color:C.teal}}>{sym}{fmt(convertAmount(val.totalCashBalance, client.reportingCcy||"USD", selectedCcy),0)}</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.teal}}>{sym}{fmt(convertAmount(val.totalCashBalance, client.reportingCcy||"USD", selectedCcy),0)}</div>
             </div>
             <div style={{textAlign:"right"}}>
               <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Liabilities</div>
-              <div style={{fontFamily:"Inter,sans-serif",fontSize:20,fontWeight:700,color:C.red}}>{sym}{fmt(convertAmount(val.totalLiabilities, client.reportingCcy||"USD", selectedCcy),0)}</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.red}}>{sym}{fmt(convertAmount(val.totalLiabilities, client.reportingCcy||"USD", selectedCcy),0)}</div>
             </div>
           </div>
         )}
@@ -603,7 +628,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
           ].map(row=>(
             <div key={row.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
               <div style={{fontSize:13,color:C.faint}}>{row.label}</div>
-              <div style={{fontFamily:"Inter,sans-serif",fontSize:16,fontWeight:600,color:row.red?C.red:C.navy}}>{row.value}</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:600,color:row.red?C.red:C.navy}}>{row.value}</div>
             </div>
           ))}
         </div>
@@ -709,7 +734,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
           </table>
           <div style={{marginTop:16,background:C.silver,borderRadius:8,padding:"12px 16px",display:"flex",justifyContent:"space-between"}}>
             <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Total paid</span>
-            <span style={{fontFamily:"Inter,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>${fmt(withdrawals.reduce((s,w)=>s+w.actualPaid,0),2)}</span>
+            <span style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>${fmt(withdrawals.reduce((s,w)=>s+w.actualPaid,0),2)}</span>
           </div>
         </div>
       )}
@@ -725,10 +750,10 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
             <div key={di} style={{marginBottom:24}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
                 <div>
-                  <div style={{fontFamily:"Inter,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>{dist.name}</div>
+                  <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>{dist.name}</div>
                   <div style={{fontSize:12,color:C.faint}}>Date: {dist.date} · {dist.payments.length} payment{dist.payments.length!==1?"s":""}</div>
                 </div>
-                <div style={{fontFamily:"Inter,sans-serif",fontSize:20,fontWeight:700,color:C.navy}}>
+                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:20,fontWeight:700,color:C.navy}}>
                   ${fmt(dist.payments.reduce((s,p)=>s+p.amount,0),2)}
                 </div>
               </div>
@@ -746,7 +771,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
                       <td style={{padding:"10px 12px",fontFamily:"monospace",fontSize:12,color:C.faint}}>{p.accountNumber}</td>
                       <td style={{padding:"10px 12px",color:C.text}}>{p.recipient}</td>
                       <td style={{padding:"10px 12px",color:C.text}}>{p.date}</td>
-                      <td style={{padding:"10px 12px",fontWeight:600,color:C.navy,fontFamily:"Inter,sans-serif"}}>${fmt(p.amount,2)}</td>
+                      <td style={{padding:"10px 12px",fontWeight:600,color:C.navy,fontFamily:"Space Grotesk,sans-serif"}}>${fmt(p.amount,2)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -763,7 +788,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
       {tab==="crm" && (
         <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(2,1fr)",gap:20}}>
           <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:20}}>
-            <div style={{fontFamily:"Inter,sans-serif",fontSize:14,fontWeight:600,color:C.navy,marginBottom:14}}>Client Details</div>
+            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.navy,marginBottom:14}}>Client Details</div>
             {[
               {label:"Full Name", value:client.name},
               {label:"Client ID", value:client.id},
@@ -783,7 +808,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
             ))}
           </div>
           <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:20}}>
-            <div style={{fontFamily:"Inter,sans-serif",fontSize:14,fontWeight:600,color:C.navy,marginBottom:14}}>Bank Details</div>
+            <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.navy,marginBottom:14}}>Bank Details</div>
             {[
               {label:"Bank Name", value:client.bankName},
               {label:"Account Number", value:client.bankAccount},
@@ -821,7 +846,7 @@ const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreview
     <div style={{padding:isMobile?"12px":24}}>
       <div style={{marginBottom:16}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:3,textTransform:"uppercase",color:C.teal,marginBottom:3}}>Client Management</div>
-        <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?20:24,fontWeight:600,color:C.navy}}>All Clients</div>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?20:24,fontWeight:600,color:C.navy}}>All Clients</div>
       </div>
       <div style={{display:"flex",gap:10,marginBottom:16}}>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name, ID or email..." style={{padding:"8px 12px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",flex:1,color:C.navy}}/>
@@ -857,7 +882,7 @@ const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreview
                   <td style={{padding:"12px 12px",color:C.faint,fontSize:11,fontFamily:"monospace"}}>{c.primaryCode}</td>
                   <td style={{padding:"12px 12px",color:C.text}}>{c.jurisdiction}</td>
                   <td style={{padding:"12px 12px",color:C.text}}>{c.reportingCcy}</td>
-                  <td style={{padding:"12px 12px",fontWeight:600,color:C.navy,fontFamily:"Inter,sans-serif"}}>{val?sym+fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),0):"--"}</td>
+                  <td style={{padding:"12px 12px",fontWeight:600,color:C.navy,fontFamily:"Space Grotesk,sans-serif"}}>{val?sym+fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),0):"--"}</td>
                   <td style={{padding:"12px 12px",color:C.green,fontWeight:600}}>{val?sym+fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),0):"--"}</td>
                   <td style={{padding:"12px 12px",color:C.red,fontWeight:600}}>{val?sym+fmt(convertAmount(val.totalLiabilities,"USD",selectedCcy),0):"--"}</td>
                   <td style={{padding:"12px 12px"}}><Badge color={c.verified?"success":"warning"}>{c.verified?"Verified":"Pending"}</Badge></td>
@@ -885,11 +910,11 @@ const WithdrawalsPage = ({selectedCcy, withdrawals: propWithdrawals, clients: pr
     <div style={{padding:24}}>
       <div style={{marginBottom:18}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:3,textTransform:"uppercase",color:C.teal,marginBottom:3}}>Processed Withdrawals</div>
-        <div style={{fontFamily:"Inter,sans-serif",fontSize:24,fontWeight:600,color:C.navy}}>Withdrawal History</div>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:24,fontWeight:600,color:C.navy}}>Withdrawal History</div>
       </div>
       <div style={{background:C.navy,borderRadius:10,padding:"16px 20px",marginBottom:20,display:"inline-block"}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:4}}>Total Paid Out</div>
-        <div style={{fontFamily:"Inter,sans-serif",fontSize:28,fontWeight:700,color:C.white}}>{sym}{fmt(total,2)}</div>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:28,fontWeight:700,color:C.white}}>{sym}{fmt(total,2)}</div>
       </div>
       <div style={{overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
@@ -935,7 +960,7 @@ const Connect = () => {
     <div style={{padding:24}}>
       <div style={{marginBottom:18}}>
         <div style={{fontSize:10,fontWeight:600,letterSpacing:3,color:C.teal,textTransform:"uppercase",marginBottom:3}}>Integrations</div>
-        <div style={{fontFamily:"Inter,sans-serif",fontSize:22,fontWeight:600,color:C.navy}}>Connect external apps</div>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:600,color:C.navy}}>Connect external apps</div>
       </div>
       {connected.includes("onedrive") && (
         <div style={{background:C.tealLight,borderRadius:10,padding:"12px 16px",marginBottom:18,display:"flex",alignItems:"center",gap:10}}>
@@ -955,7 +980,7 @@ const Connect = () => {
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:9}}>
                     <div style={{display:"flex",gap:9,alignItems:"center"}}>
                       <div style={{width:32,height:32,borderRadius:8,background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:13,fontWeight:700}}>{app.icon}</div>
-                      <div style={{fontFamily:"Inter,sans-serif",fontSize:13,fontWeight:600,color:C.navy}}>{app.name}</div>
+                      <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:13,fontWeight:600,color:C.navy}}>{app.name}</div>
                     </div>
                     {isConn && <Badge color="success">Live</Badge>}
                   </div>
@@ -977,14 +1002,15 @@ const Connect = () => {
 const LoginScreen = ({onLogin, loading, error}) => (
   <div style={{minHeight:"100vh",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
     <div style={{background:C.navyMid,borderRadius:16,padding:40,width:380,maxWidth:"100%",textAlign:"center",border:"0.5px solid rgba(0,184,176,0.2)"}}>
-      <img src="/ubiquity-mark.png" alt="Ubiquity" style={{height:72,width:"auto",marginBottom:16,filter:"brightness(0) invert(1)"}}/>
-      <div style={{fontFamily:"Inter,sans-serif",fontSize:24,fontWeight:700,color:C.white,marginBottom:8,letterSpacing:-0.5}}>Ubiquity</div>
-      <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",marginBottom:32}}>Connected insight. Unified oversight.</div>
+      <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:28,fontWeight:700,color:C.white,marginBottom:6}}>
+        <span style={{color:C.teal}}>i-</span>Convergence
+      </div>
+      <div style={{fontSize:13,color:"rgba(255,255,255,0.45)",marginBottom:32}}>Wealth Management Platform</div>
       {error && <div style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"10px 14px",marginBottom:16,fontSize:12,color:"#FCA5A5"}}>{error}</div>}
-      <button onClick={onLogin} disabled={loading} style={{width:"100%",background:C.teal,color:C.white,border:"none",borderRadius:8,padding:"13px 20px",fontSize:15,fontWeight:600,cursor:loading?"not-allowed":"pointer",fontFamily:"Inter,sans-serif",opacity:loading?0.7:1}}>
+      <button onClick={onLogin} disabled={loading} style={{width:"100%",background:C.teal,color:C.white,border:"none",borderRadius:8,padding:"13px 20px",fontSize:15,fontWeight:600,cursor:loading?"not-allowed":"pointer",fontFamily:"Space Grotesk,sans-serif",opacity:loading?0.7:1}}>
         {loading?"Signing in...":"Sign in"}
       </button>
-      <div style={{marginTop:16,fontSize:11,color:"rgba(255,255,255,0.25)"}}>Ubiquity · A product by i-Convergence · Secured by Auth0</div>
+      <div style={{marginTop:16,fontSize:11,color:"rgba(255,255,255,0.25)"}}>Secured by Auth0 MFA</div>
     </div>
   </div>
 );
@@ -1059,7 +1085,7 @@ const DocumentsTab = ({clientId, isAdviser, liveDocuments}) => {
 
       {showUpload && isAdviser && (
         <div style={{background:C.tealLight,border:"1px solid "+C.teal,borderRadius:10,padding:18,marginBottom:16}}>
-          <div style={{fontFamily:"Inter,sans-serif",fontSize:14,fontWeight:600,color:C.navy,marginBottom:12}}>Upload Document</div>
+          <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:14,fontWeight:600,color:C.navy,marginBottom:12}}>Upload Document</div>
           <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
             <div style={{flex:1,minWidth:200}}>
               <div style={{fontSize:11,fontWeight:600,color:C.faint,marginBottom:4}}>FILE</div>
@@ -1198,12 +1224,11 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
   const tabs = [["valuation","Valuation"],["holdings","Holdings"],["transactions","Transactions"],["withdrawals","Withdrawals"],["distribution","Distribution"],["documents","Documents"]];
 
   return (
-    <div style={{fontFamily:"'Inter',sans-serif",background:"#EFF7FB",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
+    <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       {/* Client Nav */}
       <div style={{background:C.navy,display:"flex",alignItems:"center",padding:"0 16px",height:54,position:"sticky",top:0,zIndex:200,borderBottom:"1px solid rgba(0,184,176,0.15)"}}>
-        <div onClick={()=>setTab("valuation")} style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?16:20,fontWeight:700,color:C.white,marginRight:"auto",cursor:"pointer",letterSpacing:-0.5,display:"flex",alignItems:"center",gap:8}}>
-          <img src="/ubiquity-mark.png" alt="Ubiquity" style={{height:26,width:"auto"}}/>
-          <span>Ubiquity</span>
+        <div onClick={()=>setTab("valuation")} style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?16:20,fontWeight:700,color:C.white,marginRight:"auto",cursor:"pointer"}}>
+          <span style={{color:C.teal}}>i-</span>Convergence
         </div>
         <CCYSelector selectedCcy={selectedCcy} onChange={setCcy}/>
         <div style={{width:32,height:32,borderRadius:"50%",background:C.teal,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:12,fontWeight:600,marginLeft:12,cursor:"pointer"}} title={user?.email}>
@@ -1220,7 +1245,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
               {client.name.split(" ").map(n=>n[0]).join("")}
             </div>
             <div>
-              <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{client.name}</div>
+              <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{client.name}</div>
               <div style={{fontSize:12,color:"rgba(255,255,255,0.5)"}}>{client.primaryCode} · {client.reportingCcy} · {client.jurisdiction}</div>
             </div>
           </div>
@@ -1228,11 +1253,11 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
             <div style={{display:"flex",gap:isMobile?12:20,flexWrap:"wrap"}}>
               <div style={{textAlign:"right"}}>
                 <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Portfolio Value</div>
-                <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{sym}{fmt(convertAmount(val.totalAssetValuation, client.reportingCcy||"USD", selectedCcy),0)}</div>
+                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{sym}{fmt(convertAmount(val.totalAssetValuation, client.reportingCcy||"USD", selectedCcy),0)}</div>
               </div>
               <div style={{textAlign:"right"}}>
                 <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Cash</div>
-                <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.teal}}>{sym}{fmt(convertAmount(val.totalCashBalance, client.reportingCcy||"USD", selectedCcy),0)}</div>
+                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.teal}}>{sym}{fmt(convertAmount(val.totalCashBalance, client.reportingCcy||"USD", selectedCcy),0)}</div>
               </div>
             </div>
           )}
@@ -1249,7 +1274,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
             ].map(card=>(
               <div key={card.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"14px 16px"}}>
                 <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:C.faint,marginBottom:6}}>{card.label}</div>
-                <div style={{fontFamily:"Inter,sans-serif",fontSize:18,fontWeight:700,color:card.color}}>{card.value}</div>
+                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:18,fontWeight:700,color:card.color}}>{card.value}</div>
               </div>
             ))}
           </div>
@@ -1281,7 +1306,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
             ].map(row=>(
               <div key={row.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div style={{fontSize:13,color:C.faint}}>{row.label}</div>
-                <div style={{fontFamily:"Inter,sans-serif",fontSize:16,fontWeight:600,color:row.red?C.red:C.navy}}>{row.value}</div>
+                <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:600,color:row.red?C.red:C.navy}}>{row.value}</div>
               </div>
             ))}
           </div>
@@ -1389,7 +1414,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
             {withdrawals.length>0&&(
               <div style={{marginTop:14,background:C.silver,borderRadius:8,padding:"12px 16px",display:"flex",justifyContent:"space-between"}}>
                 <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Total paid</span>
-                <span style={{fontFamily:"Inter,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>${fmt(withdrawals.reduce((s,w)=>s+w.actualPaid,0),2)}</span>
+                <span style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>${fmt(withdrawals.reduce((s,w)=>s+w.actualPaid,0),2)}</span>
               </div>
             )}
           </div>
@@ -1407,10 +1432,10 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
               <div key={di} style={{marginBottom:24,background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:20}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16,flexWrap:"wrap",gap:8}}>
                   <div>
-                    <div style={{fontFamily:"Inter,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>{dist.name}</div>
+                    <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>{dist.name}</div>
                     <div style={{fontSize:12,color:C.faint}}>Date: {dist.date} · {dist.payments.length} payment{dist.payments.length!==1?"s":""}</div>
                   </div>
-                  <div style={{fontFamily:"Inter,sans-serif",fontSize:22,fontWeight:700,color:C.navy}}>
+                  <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:22,fontWeight:700,color:C.navy}}>
                     ${fmt(dist.payments.reduce((s,p)=>s+p.amount,0),2)}
                   </div>
                 </div>
@@ -1428,7 +1453,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
                         <td style={{padding:"10px 10px",fontFamily:"monospace",fontSize:12,color:C.faint}}>{p.accountNumber}</td>
                         <td style={{padding:"10px 10px",color:C.text}}>{p.recipient}</td>
                         <td style={{padding:"10px 10px",color:C.text}}>{p.date}</td>
-                        <td style={{padding:"10px 10px",fontWeight:600,color:C.navy,fontFamily:"Inter,sans-serif"}}>${fmt(p.amount,2)}</td>
+                        <td style={{padding:"10px 10px",fontWeight:600,color:C.navy,fontFamily:"Space Grotesk,sans-serif"}}>${fmt(p.amount,2)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1476,10 +1501,7 @@ export default function App() {
   if (loading || dataLoading) return (
     <div style={{minHeight:"100vh",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center"}}>
       <div style={{textAlign:"center"}}>
-        <div style={{display:"flex",alignItems:"center",gap:10,justifyContent:"center",marginBottom:20}}>
-          <img src="/ubiquity-mark.png" alt="Ubiquity" style={{height:48,width:"auto",opacity:0.9}}/>
-          <span style={{fontFamily:"Inter,sans-serif",fontSize:28,fontWeight:700,color:C.white,letterSpacing:-0.5}}>Ubiquity</span>
-        </div>
+        <div style={{fontFamily:"Space Grotesk,sans-serif",fontSize:28,fontWeight:700,color:C.white,marginBottom:20}}><span style={{color:C.teal}}>i-</span>Convergence</div>
         <div style={{width:32,height:32,border:"3px solid rgba(0,184,176,0.3)",borderTop:"3px solid "+C.teal,borderRadius:"50%",animation:"spin 0.8s linear infinite",margin:"0 auto"}}/>
       </div>
     </div>
@@ -1494,7 +1516,7 @@ export default function App() {
   if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments} clients={clients}/>;
 
   return (
-    <div style={{fontFamily:"'Inter',sans-serif",background:"#EFF7FB",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
+    <div style={{fontFamily:"'Inter',sans-serif",background:"#F2F5F9",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       <Nav section={section} setSection={handleSection} selectedCcy={selectedCcy} setCcy={setSelectedCcy} user={user} logout={logout}/>
       <div style={{flex:1,overflowY:"auto",paddingBottom:isMobile?68:0}}>
         {section==="dashboard" && <Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} clients={clients} valuations={valuations} lastUpdated={lastUpdated} dataError={dataError} onRefresh={refresh}/>}
