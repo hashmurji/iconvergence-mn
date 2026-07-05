@@ -1,12 +1,8 @@
 // api/distributions.js
-// Each distribution "batch" (name) can have multiple recipient payments.
-// Grouped into { [clientId]: [ { name, date, payments: [...] } ] } to match
-// the Distribution tab's dist.payments.map() usage in App.jsx.
+import { pool } from "../lib/db.js";
+import { requireAuth, resolveClientScope } from "../lib/auth.js";
 
-const { pool } = require("../lib/db");
-const { requireAuth, resolveClientScope } = require("../lib/auth");
-
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
   try {
@@ -23,11 +19,10 @@ module.exports = async (req, res) => {
 
     const { rows } = await pool.query(query, params);
 
-    // Group rows into per-client arrays of { name, date, payments: [] }
     const byClient = {};
     for (const r of rows) {
       if (!byClient[r.client_id]) byClient[r.client_id] = new Map();
-      const batchKey = r.distribution_name; // one batch per distribution_name
+      const batchKey = r.distribution_name;
       const clientMap = byClient[r.client_id];
       if (!clientMap.has(batchKey)) {
         clientMap.set(batchKey, {
@@ -54,4 +49,4 @@ module.exports = async (req, res) => {
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
-};
+}

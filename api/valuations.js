@@ -1,11 +1,8 @@
 // api/valuations.js
-// One row per client in the valuations table (no history) — returned as a
-// map keyed by client_id, matching how App.jsx indexes valuations[clientId].
+import { pool } from "../lib/db.js";
+import { requireAuth, resolveClientScope } from "../lib/auth.js";
 
-const { pool } = require("../lib/db");
-const { requireAuth, resolveClientScope } = require("../lib/auth");
-
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
   try {
@@ -42,4 +39,4 @@ module.exports = async (req, res) => {
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
-};
+}

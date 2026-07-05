@@ -1,12 +1,11 @@
 // api/clients.js
-// Replaces the OneDrive-backed /api/clients endpoint.
 // IMPORTANT: bank_account_number, bank_sort_code, bank_name are deliberately
 // excluded from this SELECT — they are never returned to the frontend.
 
-const { pool } = require("../lib/db");
-const { requireAuth, resolveClientScope } = require("../lib/auth");
+import { pool } from "../lib/db.js";
+import { requireAuth, resolveClientScope } from "../lib/auth.js";
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
   try {
@@ -42,4 +41,4 @@ module.exports = async (req, res) => {
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
-};
+}

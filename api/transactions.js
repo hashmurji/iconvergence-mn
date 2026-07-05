@@ -1,14 +1,8 @@
 // api/transactions.js
-// Flat array matching txns.length / txns.map() usage in App.jsx.
-// A client-role user is always scoped to their own client_id; advisers can
-// optionally filter with ?clientId=... or omit it to get everything.
-// Given ~500k rows, this includes basic pagination — adjust limit/offset
-// as needed once you see real usage patterns.
+import { pool } from "../lib/db.js";
+import { requireAuth, resolveClientScope } from "../lib/auth.js";
 
-const { pool } = require("../lib/db");
-const { requireAuth, resolveClientScope } = require("../lib/auth");
-
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
   try {
@@ -59,4 +53,4 @@ module.exports = async (req, res) => {
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
-};
+}

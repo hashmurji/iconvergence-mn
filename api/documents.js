@@ -1,15 +1,9 @@
 // api/documents.js
-// Returns document METADATA ONLY — never a direct S3 URL. Downloads go
-// through /api/documents/download (separate file) which generates a
-// short-lived pre-signed URL after re-checking ownership.
-//
-// A client-role user only ever sees documents where visible_to_client = true
-// AND client_id matches their own token — enforced here, not just in the UI.
+// Returns document METADATA ONLY — never a direct S3 URL.
+import { pool } from "../lib/db.js";
+import { requireAuth, resolveClientScope } from "../lib/auth.js";
 
-const { pool } = require("../lib/db");
-const { requireAuth, resolveClientScope } = require("../lib/auth");
-
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
   try {
@@ -24,7 +18,6 @@ module.exports = async (req, res) => {
       params.push(scopedClientId);
       conditions.push(`client_id = $${params.length}`);
     }
-    // Clients only ever see documents marked visible; advisers see everything
     if (auth.isClient && !auth.isAdviser) {
       conditions.push(`visible_to_client = true`);
     }
@@ -48,4 +41,4 @@ module.exports = async (req, res) => {
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
-};
+}
