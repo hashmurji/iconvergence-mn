@@ -176,8 +176,8 @@ const C = {
 };
 
 // --- FX (static for now - will be updated manually) -------------------------
-const FX = { USDAUD: 1.501186, AUDUSD: 0.6661, USDEUR: 0.91954, EURUSD: 1.0875, USDGBP: 0.792519, GBPUSD: 1.2619, AUDEUR: 0.6128, EURAUD: 1.6318, AUDGBP: 0.5279, GBPAUD: 1.8944, EURGBP: 0.8620, GBPEUR: 1.1600 };
-const CCY_SYMBOLS = { USD: "$", GBP: "£", EUR: "€", AUD: "A$" };
+const FX = { USDAUD: 1.501186, AUDUSD: 0.6661, USDEUR: 0.91954, EURUSD: 1.0875, USDGBP: 0.792519, GBPUSD: 1.2619, AUDEUR: 0.6128, EURAUD: 1.6318, AUDGBP: 0.5279, GBPAUD: 1.8944, EURGBP: 0.8620, GBPEUR: 1.1600, USDCHF: 0.871688, CHFUSD: 1.1472, GBPCHF: 1.1000, CHFGBP: 0.9091, EURCHF: 0.9480, CHFEUR: 1.0549, AUDCHF: 0.5806, CHFAUD: 1.7223 };
+const CCY_SYMBOLS = { USD: "$", GBP: "£", EUR: "€", AUD: "A$", CHF: "CHF " };
 const convertAmount = (amount, fromCcy, toCcy) => {
   if (!amount || fromCcy === toCcy) return amount || 0;
   const key = fromCcy.toUpperCase()+toCcy.toUpperCase();
@@ -246,7 +246,7 @@ const Modal = ({title, onClose, children}) => (
 // --- NAV ---------------------------------------------------------------------
 const CCYSelector = ({selectedCcy, onChange}) => (
   <div style={{display:"flex",alignItems:"center",gap:2,background:"rgba(255,255,255,0.08)",borderRadius:7,padding:"2px 3px"}}>
-    {["USD","GBP","EUR","AUD"].map(c=>(
+    {["USD","GBP","EUR","AUD","CHF"].map(c=>(
       <button key={c} onClick={()=>onChange(c)} style={{background:selectedCcy===c?C.teal:"transparent",color:selectedCcy===c?C.white:"rgba(255,255,255,0.55)",border:"none",borderRadius:5,padding:"3px 8px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>
         {c}
       </button>
@@ -330,9 +330,9 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
     ).slice(0, 10);
   }, [search, clients]);
   const handleSelectClient = (id) => { setSearch(""); setSearchFocused(false); setSelectedClient(id); setSection("clients"); };
-  const totalAUM = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalAssetValuation, "USD", selectedCcy), 0);
-  const totalCash = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalCashBalance, "USD", selectedCcy), 0);
-  const totalLiabilities = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalLiabilities, "USD", selectedCcy), 0);
+  const totalAUM = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalAssetValuation, v.currency||"USD", selectedCcy), 0);
+  const totalCash = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalCashBalance, v.currency||"USD", selectedCcy), 0);
+  const totalLiabilities = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalLiabilities, v.currency||"USD", selectedCcy), 0);
 
   return (
     <div style={{padding:isMobile?"14px 12px":24}}>
@@ -358,7 +358,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
           <div style={{position:"absolute",top:"100%",left:0,right:0,background:C.white,border:"1px solid "+C.silver,borderRadius:8,boxShadow:"0 8px 24px rgba(0,0,0,0.12)",zIndex:100,marginTop:4,maxHeight:380,overflowY:"auto"}}>
             {searchResults.map(cl => {
               const val = valuations[cl.id];
-              const aum = val ? convertAmount(val.totalAssetValuation,"USD",selectedCcy) : null;
+              const aum = val ? convertAmount(val.totalAssetValuation,val.currency||"USD",selectedCcy) : null;
               return (
                 <div key={cl.id} onMouseDown={()=>handleSelectClient(cl.id)}
                   style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",cursor:"pointer",borderBottom:"0.5px solid "+C.silver,background:C.white}}
@@ -411,8 +411,8 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
       <div style={{display:"flex",flexDirection:"column",gap:0,marginBottom:14,background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden"}}>
         {clients.map(c => {
           const val = valuations[c.id];
-          const aum = val ? convertAmount(val.totalAssetValuation, "USD", selectedCcy) : 0;
-          const liab = val ? convertAmount(val.totalLiabilities, "USD", selectedCcy) : 0;
+          const aum = val ? convertAmount(val.totalAssetValuation, val.currency||"USD", selectedCcy) : 0;
+          const liab = val ? convertAmount(val.totalLiabilities, val.currency||"USD", selectedCcy) : 0;
           const net = aum - liab;
           return (
             <div key={c.id} onClick={()=>{setSelectedClient(c.id);setSection("clients");}}
@@ -803,9 +803,9 @@ const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreview
                   <td style={{padding:"12px 12px",color:C.faint,fontSize:11,fontFamily:"monospace"}}>{c.primaryCode}</td>
                   <td style={{padding:"12px 12px",color:C.text}}>{c.jurisdiction}</td>
                   <td style={{padding:"12px 12px",color:C.text}}>{c.reportingCcy}</td>
-                  <td style={{padding:"12px 12px",fontWeight:600,color:C.navy,fontFamily:"Inter,sans-serif"}}>{val?sym+fmt(convertAmount(val.totalAssetValuation,"USD",selectedCcy),0):"--"}</td>
-                  <td style={{padding:"12px 12px",color:C.green,fontWeight:600}}>{val?sym+fmt(convertAmount(val.totalCashBalance,"USD",selectedCcy),0):"--"}</td>
-                  <td style={{padding:"12px 12px",color:C.red,fontWeight:600}}>{val?sym+fmt(convertAmount(val.totalLiabilities,"USD",selectedCcy),0):"--"}</td>
+                  <td style={{padding:"12px 12px",fontWeight:600,color:C.navy,fontFamily:"Inter,sans-serif"}}>{val?sym+fmt(convertAmount(val.totalAssetValuation,val.currency||"USD",selectedCcy),0):"--"}</td>
+                  <td style={{padding:"12px 12px",color:C.green,fontWeight:600}}>{val?sym+fmt(convertAmount(val.totalCashBalance,val.currency||"USD",selectedCcy),0):"--"}</td>
+                  <td style={{padding:"12px 12px",color:C.red,fontWeight:600}}>{val?sym+fmt(convertAmount(val.totalLiabilities,val.currency||"USD",selectedCcy),0):"--"}</td>
                   <td style={{padding:"12px 12px"}}><Badge color={c.verified?"success":"warning"}>{c.verified?"Verified":"Pending"}</Badge></td>
                 </tr>
               );
@@ -825,7 +825,7 @@ const WithdrawalsPage = ({selectedCcy, withdrawals: propWithdrawals, clients: pr
   const allWithdrawals = Object.entries(withdrawalsData).flatMap(([clientId, wds]) =>
     wds.map(w => ({ ...w, clientId, clientName: clientsData.find(c=>c.id===clientId)?.name || clientId }))
   );
-  const total = allWithdrawals.reduce((s,w)=>s+convertAmount(w.actualPaid,"USD",selectedCcy),0);
+  const total = allWithdrawals.reduce((s,w)=>s+convertAmount(w.actualPaid,w.currency||"USD",selectedCcy),0);
 
   return (
     <div style={{padding:24}}>
