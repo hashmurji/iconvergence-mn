@@ -179,12 +179,14 @@ const C = {
 const FX = { USDAUD: 1.501186, AUDUSD: 0.6661, USDEUR: 0.91954, EURUSD: 1.0875, USDGBP: 0.792519, GBPUSD: 1.2619, AUDEUR: 0.6128, EURAUD: 1.6318, AUDGBP: 0.5279, GBPAUD: 1.8944, EURGBP: 0.8620, GBPEUR: 1.1600, USDCHF: 0.871688, CHFUSD: 1.1472, GBPCHF: 1.1000, CHFGBP: 0.9091, EURCHF: 0.9480, CHFEUR: 1.0549, AUDCHF: 0.5806, CHFAUD: 1.7223 };
 const CCY_SYMBOLS = { USD: "$", GBP: "£", EUR: "€", AUD: "A$", CHF: "CHF " };
 const convertAmount = (amount, fromCcy, toCcy) => {
-  if (!amount || fromCcy === toCcy) return amount || 0;
+  const n = Number(amount);
+  if (!n || isNaN(n)) return 0;
+  if (fromCcy === toCcy) return n;
   const key = fromCcy.toUpperCase()+toCcy.toUpperCase();
-  if (FX[key]) return amount * FX[key];
+  if (FX[key]) return n * FX[key];
   const key2 = toCcy.toUpperCase()+fromCcy.toUpperCase();
-  if (FX[key2]) return amount / FX[key2];
-  return amount;
+  if (FX[key2]) return n / FX[key2];
+  return n;
 };
 
 // --- CLIENT DATA (from MN_Client_Data_for_PAS_test.xlsx) ---------------------
