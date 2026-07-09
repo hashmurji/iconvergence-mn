@@ -1230,7 +1230,6 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
     setDetailLoading(true); setDetailData(null);
     fetch("/api/clientdetail?clientId="+clientId0, {headers: getAuthHeaders()}).then(r=>r.json()).then(d=>{ if(!d.error) setDetailData(d); }).catch(()=>{}).finally(()=>setDetailLoading(false));
   }, [clientId0]);
-  const clientsSourceP0 = propClients || CLIENTS;
   const client = previewClientObj || clientsSourceP0.find(cl => cl.id === user?.clientId) || clientsSourceP0[0];
   const clientId = client?.id;
   const val = (propValuations || VALUATIONS)[clientId];
