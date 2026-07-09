@@ -110,6 +110,21 @@ const getStoredAccessToken = () => {
   } catch (e) { return null; }
 };
 
+const useDashboardStats = () => {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const fetchStats = (bust=false) => {
+    setLoading(true);
+    fetch("/api/dashboardstats"+(bust?"?t="+Date.now():""))
+      .then(r=>r.json())
+      .then(d=>{ if(!d.error) setStats(d); })
+      .catch(()=>{})
+      .finally(()=>setLoading(false));
+  };
+  useEffect(()=>{ fetchStats(); }, []);
+  return { stats, loading, refresh: ()=>fetchStats(true) };
+};
+
 const useOneDriveData = () => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -314,13 +329,28 @@ const Nav = ({section, setSection, selectedCcy, setCcy, user, logout}) => {
 };
 
 // --- DASHBOARD ---------------------------------------------------------------
-const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propClients, valuations: propValuations, lastUpdated, dataError, onRefresh}) => {
+const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propClients, valuations: propValuations, lastUpdated, dataError, onRefresh, dashboardStats}) => {
   const isMobile = useIsMobile();
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
   const clients = propClients || [];
   const valuations = propValuations || {};
   const [search, setSearch] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
+
+  // Compute FX-converted totals from dashboardStats
+  const convertByCurrency = (byCurrency) => {
+    if (!byCurrency) return 0;
+    return Object.entries(byCurrency).reduce((sum, [ccy, amount]) => {
+      return sum + convertAmount(amount, ccy, selectedCcy);
+    }, 0);
+  };
+  const totalAUM = dashboardStats ? convertByCurrency(dashboardStats.aumByCurrency) : Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalBriteAssets||0, v.currency||"USD", selectedCcy), 0);
+  const totalCash = dashboardStats ? convertByCurrency(dashboardStats.cashByCurrency) : Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalCashBalance||0, v.currency||"USD", selectedCcy), 0);
+  const totalBeneficiaries = dashboardStats ? dashboardStats.totalBeneficiaries : clients.length;
+  const activeClients = dashboardStats ? dashboardStats.activeClients : clients.length;
+  const trustees = dashboardStats ? dashboardStats.trustees : [];
+  const grandTrusteeAUM = trustees.reduce((s,t) => s + convertAmount(t.totalAum, t.currency, selectedCcy), 0);
+
   const searchResults = useMemo(() => {
     if (!search || search.length < 2) return [];
     const q = search.toLowerCase();
@@ -332,8 +362,6 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
     ).slice(0, 10);
   }, [search, clients]);
   const handleSelectClient = (id) => { setSearch(""); setSearchFocused(false); setSelectedClient(id); setSection("clients"); };
-  const totalAUM = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalAssetValuation, v.currency||"USD", selectedCcy), 0);
-  const totalCash = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalCashBalance, v.currency||"USD", selectedCcy), 0);
   const totalLiabilities = Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalLiabilities, v.currency||"USD", selectedCcy), 0);
 
   return (
@@ -389,26 +417,66 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
         )}
       </div>
 
-      <div style={{background:C.navy,borderRadius:12,padding:isMobile?"16px":24,marginBottom:14,display:"flex",flexWrap:"wrap",gap:16,justifyContent:"space-between",alignItems:"flex-start"}}>
-        <div>
-          <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:5}}>Total AUM ({selectedCcy})</div>
-          <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?28:36,fontWeight:700,color:C.white,letterSpacing:-1}}>{sym}{fmt(totalAUM,0)}</div>
-          <div style={{fontSize:12,color:"rgba(255,255,255,0.5)",marginTop:4}}>Net of {sym}{fmt(totalLiabilities,0)} liabilities</div>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          {[
-            {label:"Active clients", value:clients.length.toString()},
-            {label:"Cash balance", value:sym+fmt(totalCash,0)},
-            {label:"Total liabilities", value:sym+fmt(totalLiabilities,0)},
-            {label:"Verified", value:CLIENTS.filter(c=>c.verified).length+" of "+CLIENTS.length},
-          ].map(s=>(
-            <div key={s.label} style={{background:C.navyMid,border:"0.5px solid rgba(255,255,255,0.08)",borderRadius:10,padding:"12px 14px"}}>
-              <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)",marginBottom:4}}>{s.label}</div>
-              <div style={{fontFamily:"Inter,sans-serif",fontSize:18,fontWeight:600,color:C.white}}>{s.value}</div>
-            </div>
-          ))}
-        </div>
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:12,marginBottom:14}}>
+        {[
+          {label:"Total AUM", value:sym+fmt(totalAUM,0), sub:selectedCcy},
+          {label:"Total Beneficiaries", value:(dashboardStats?dashboardStats.totalBeneficiaries:clients.length).toLocaleString(), sub:"across all clients"},
+          {label:"Active Clients", value:(dashboardStats?dashboardStats.activeClients:clients.length).toLocaleString(), sub:"status active"},
+          {label:"Cash Balance", value:sym+fmt(totalCash,0), sub:selectedCcy},
+        ].map(s=>(
+          <div key={s.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:"16px 18px",boxShadow:"0 2px 8px rgba(6,27,51,0.06)"}}>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:C.faint,marginBottom:8}}>{s.label}</div>
+            <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?20:26,fontWeight:700,color:C.navy,letterSpacing:-0.5,lineHeight:1}}>{s.value}</div>
+            <div style={{fontSize:11,color:C.faint,marginTop:4}}>{s.sub}</div>
+          </div>
+        ))}
       </div>
+
+      {trustees && trustees.length > 0 && (
+        <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden",marginBottom:14}}>
+          <div style={{padding:"12px 16px",borderBottom:"0.5px solid "+C.silver,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{fontSize:13,fontWeight:700,color:C.navy}}>Top Trustees by AUM</div>
+            <div style={{fontSize:11,color:C.faint}}>{selectedCcy}</div>
+          </div>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+            <thead>
+              <tr style={{background:C.silver}}>
+                {["Trustee","Beneficiaries","AUM","% of Total"].map(h=>(
+                  <th key={h} style={{textAlign:"left",padding:"8px 16px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {trustees.map((t,i) => {
+                const aum = convertAmount(t.totalAum, t.currency, selectedCcy);
+                const pct = grandTrusteeAUM > 0 ? (aum/grandTrusteeAUM*100).toFixed(1) : "0.0";
+                return (
+                  <tr key={t.trustee} style={{borderBottom:"0.5px solid "+C.silver,background:i%2===0?C.white:"#F8FAFC"}}>
+                    <td style={{padding:"11px 16px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:10}}>
+                        <div style={{width:30,height:30,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:10,fontWeight:700,flexShrink:0}}>
+                          {t.trustee.trim().split(" ").filter(Boolean).map(n=>n[0]).join("").slice(0,2).toUpperCase()}
+                        </div>
+                        <span style={{fontWeight:600,color:C.navy}}>{t.trustee}</span>
+                      </div>
+                    </td>
+                    <td style={{padding:"11px 16px",color:C.text}}>{t.beneficiaries.toLocaleString()}</td>
+                    <td style={{padding:"11px 16px",fontWeight:600,color:C.navy}}>{sym}{fmt(aum,0)}</td>
+                    <td style={{padding:"11px 16px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <div style={{flex:1,height:4,background:C.silver,borderRadius:2,maxWidth:80}}>
+                          <div style={{width:Math.min(parseFloat(pct),100)+"%",height:"100%",background:C.teal,borderRadius:2}}/>
+                        </div>
+                        <span style={{fontSize:12,color:C.faint,minWidth:35}}>{pct}%</span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <div style={{display:"flex",flexDirection:"column",gap:0,marginBottom:14,background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden"}}>
         {clients.map(c => {
@@ -1394,6 +1462,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
 export default function App() {
   const {user, loading: authLoading, error: authError, login, logout} = useAuth();
   const {data: liveData, loading: dataLoading, error: dataError, lastUpdated, refresh} = useOneDriveData();
+  const {stats: dashboardStats, refresh: refreshStats} = useDashboardStats();
   const [section, setSection] = useState("dashboard");
   const [selectedClient, setSelectedClient] = useState(null);
   const [selectedCcy, setSelectedCcy] = useState("USD");
@@ -1445,7 +1514,7 @@ export default function App() {
     <div style={{fontFamily:"'Inter',sans-serif",background:"#EFF7FB",minHeight:"100vh",display:"flex",flexDirection:"column"}}>
       <Nav section={section} setSection={handleSection} selectedCcy={selectedCcy} setCcy={setSelectedCcy} user={user} logout={logout}/>
       <div style={{flex:1,overflowY:"auto",paddingBottom:isMobile?68:0}}>
-        {section==="dashboard" && <Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} clients={clients} valuations={valuations} lastUpdated={lastUpdated} dataError={dataError} onRefresh={refresh}/>}
+        {section==="dashboard" && <Dashboard setSection={handleSection} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} clients={clients} valuations={valuations} lastUpdated={lastUpdated} dataError={dataError} onRefresh={()=>{refresh();refreshStats();}} dashboardStats={dashboardStats}/>}
         {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} clients={clients} valuations={valuations} holdings={holdings} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>}
         {section==="withdrawals" && <WithdrawalsPage selectedCcy={selectedCcy} withdrawals={withdrawals} clients={clients}/>}
         {section==="connect" && <Connect/>}
