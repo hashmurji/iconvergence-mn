@@ -353,7 +353,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
   const totalCash = dashboardStats ? convertByCurrency(dashboardStats.cashByCurrency) : Object.values(valuations).reduce((s,v) => s + convertAmount(v.totalCashBalance||0, v.currency||"USD", selectedCcy), 0);
   const totalBeneficiaries = dashboardStats ? dashboardStats.totalBeneficiaries : clients.length;
   const activeClients = dashboardStats ? dashboardStats.activeClients : clients.length;
-  const trustees = dashboardStats ? dashboardStats.trustees : [];
+  const trustees = dashboardStats ? (dashboardStats.trustees || []).filter(t => t && t.trustee) : [];
   const trusteeAUM = (t) => (t.amounts||[]).reduce((s,a) => s + convertAmount(parseFloat(a.amount)||0, a.currency||"USD", selectedCcy), 0);
   const grandTrusteeAUM = trustees.reduce((s,t) => s + trusteeAUM(t), 0);
   const rawStockTypes = dashboardStats ? dashboardStats.aumByStockType || [] : [];
@@ -475,9 +475,9 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
                     <td style={{padding:"8px 12px"}}>
                       <div style={{display:"flex",alignItems:"center",gap:8}}>
                         <div style={{width:28,height:28,borderRadius:8,background:bgColor,display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontSize:9,fontWeight:700,flexShrink:0,letterSpacing:0.5}}>
-                          {t.trustee.trim().split(" ").filter(Boolean).map(n=>n[0]).join("").slice(0,3).toUpperCase()}
+                          {(t.trustee||"?").trim().split(" ").filter(Boolean).map(n=>n[0]).join("").slice(0,3).toUpperCase()}
                         </div>
-                        <span style={{fontWeight:600,color:C.navy,fontSize:12}}>{t.trustee}</span>
+                        <span style={{fontWeight:600,color:C.navy,fontSize:12}}>{t.trustee||"Unknown"}</span>
                       </div>
                     </td>
                     <td style={{padding:"8px 12px",color:C.text}}>{t.beneficiaries.toLocaleString()}</td>
