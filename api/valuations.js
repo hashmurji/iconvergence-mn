@@ -26,12 +26,16 @@ export default async function handler(req, res) {
         totalAssetValuation: r.total_asset_valuation,
         totalCashBalance: r.total_cash_balance,
         pensionValuation: r.pension_valuation,
+        pensionCash: r.pension_cash_balance,
         pensionCashBalance: r.pension_cash_balance,
+        directInvestmentCash: r.direct_investment_cash_balance,
         directInvestmentCashBalance: r.direct_investment_cash_balance,
+        directInvestmentAssets: r.direct_investment_asset_valuation,
         directInvestmentAssetValuation: r.direct_investment_asset_valuation,
         totalLiabilities: r.total_liabilities,
         surrenderRebatePayable: r.surrender_rebate_payable,
         currency: r.currency,
+        reportingCcy: r.currency,
       };
     }
 

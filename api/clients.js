@@ -14,7 +14,8 @@ export default async function handler(req, res) {
 
     let query = `
       SELECT client_id, client_name, reporting_currency, jurisdiction,
-             verified, date_of_birth, email_address, client_address
+             verified, date_of_birth, email_address, client_address,
+             primary_client_code, status
       FROM clients
     `;
     const params = [];
@@ -29,12 +30,15 @@ export default async function handler(req, res) {
     const clients = rows.map((r) => ({
       id: r.client_id,
       name: r.client_name,
+      reportingCcy: r.reporting_currency,
       currency: r.reporting_currency,
       jurisdiction: r.jurisdiction,
       verified: r.verified,
+      status: r.status,
       dateOfBirth: r.date_of_birth,
       email: r.email_address,
       address: r.client_address,
+      primaryCode: r.primary_client_code,
     }));
 
     res.status(200).json({ clients, lastUpdated: new Date().toISOString() });

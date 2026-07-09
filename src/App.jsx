@@ -640,7 +640,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
         <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(2,1fr)",gap:12}}>
           <div style={{gridColumn:"1 / -1",fontSize:12,color:C.faint,marginBottom:-4,display:"flex",alignItems:"center",gap:6}}>
             <span>Source values reported in</span>
-            <Badge color="navy">{client.reportingCcy || "USD"}</Badge>
+            <Badge color="navy">{client.reportingCcy || client.currency || "USD"}</Badge>
             <span>· Showing in</span>
             <Badge color="info">{selectedCcy}</Badge>
           </div>
@@ -1173,13 +1173,11 @@ const DocumentsTab = ({clientId, isAdviser, liveDocuments}) => {
                   onClick={()=>{
                     if (doc.downloadUrl) {
                       const a = document.createElement("a");
-                      a.href=doc.downloadUrl; a.download=doc.name; a.click();
+                      a.href=doc.downloadUrl; a.download=doc.name||doc.title; a.click();
+                    } else if (doc.id && doc.isLive) {
+                      window.open("/api/documents/download?id="+doc.id, "_blank");
                     } else {
-                      const blob = new Blob(["Document: "+doc.name], {type:"application/octet-stream"});
-                      const url = URL.createObjectURL(blob);
-                      const a = document.createElement("a");
-                      a.href=url; a.download=doc.name; a.click();
-                      URL.revokeObjectURL(url);
+                      alert("Download not available for this document.");
                     }
                   }}
                   style={{background:C.teal,color:C.white,border:"none",borderRadius:6,padding:"5px 12px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap"}}>

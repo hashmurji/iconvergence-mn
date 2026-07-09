@@ -31,9 +31,12 @@ export default async function handler(req, res) {
         gainLossCurrency: r.gain_loss_currency,
         gainLoss: r.gain_loss,
         percentChange: r.percent_change,
+        pctChange: parseFloat(r.percent_change) || 0,
         financialAccountName: r.financial_account_name,
         financialAccountNumber: r.financial_account_number,
+        account: r.financial_account_name,
         shares: r.shares,
+        stockType: r.stock_type || null,
       });
     }
 

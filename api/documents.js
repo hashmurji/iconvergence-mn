@@ -32,8 +32,14 @@ export default async function handler(req, res) {
       documents[r.client_id].push({
         id: r.id,
         title: r.title,
+        name: r.title,
         docType: r.doc_type,
+        category: r.doc_type,
         uploadedAt: r.uploaded_at,
+        date: r.uploaded_at ? r.uploaded_at.toISOString().slice(0,10) : null,
+        size: null,
+        uploadedBy: "Adviser",
+        isLive: true,
       });
     }
 
