@@ -115,11 +115,16 @@ const useDashboardStats = () => {
   const [loading, setLoading] = useState(true);
   const fetchStats = (bust=false) => {
     setLoading(true);
-    fetch("/api/dashboardstats"+(bust?"?t="+Date.now():""))
-      .then(r=>r.json())
-      .then(d=>{ if(!d.error) setStats(d); })
-      .catch(()=>{})
-      .finally(()=>setLoading(false));
+    try {
+      const stored = sessionStorage.getItem("mn_auth");
+      const token = stored ? JSON.parse(stored).accessToken : null;
+      const headers = token ? { Authorization: "Bearer " + token } : {};
+      fetch("/api/dashboardstats"+(bust?"?t="+Date.now():""), { headers })
+        .then(r=>r.json())
+        .then(d=>{ if(!d.error) setStats(d); })
+        .catch(()=>{})
+        .finally(()=>setLoading(false));
+    } catch(e) { setLoading(false); }
   };
   useEffect(()=>{ fetchStats(); }, []);
   return { stats, loading, refresh: ()=>fetchStats(true) };
@@ -419,15 +424,20 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
 
       <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr 1fr":"repeat(4,1fr)",gap:12,marginBottom:14}}>
         {[
-          {label:"Total AUM", value:sym+fmt(totalAUM,0), sub:selectedCcy},
-          {label:"Total Beneficiaries", value:(dashboardStats?dashboardStats.totalBeneficiaries:clients.length).toLocaleString(), sub:"across all clients"},
-          {label:"Active Clients", value:(dashboardStats?dashboardStats.activeClients:clients.length).toLocaleString(), sub:"status active"},
-          {label:"Cash Balance", value:sym+fmt(totalCash,0), sub:selectedCcy},
+          {label:"Total AUM", value:sym+fmt(totalAUM,0), sub:selectedCcy, icon:"◈", iconBg:"rgba(16,198,193,0.12)", iconColor:C.teal},
+          {label:"Total Beneficiaries", value:(dashboardStats?dashboardStats.totalBeneficiaries:clients.length).toLocaleString(), sub:"across all clients", icon:"◉", iconBg:"rgba(29,125,255,0.10)", iconColor:"#1D7DFF"},
+          {label:"Active Clients", value:(dashboardStats?dashboardStats.activeClients:clients.length).toLocaleString(), sub:"status active", icon:"◎", iconBg:"rgba(34,197,139,0.12)", iconColor:C.green},
+          {label:"Cash Balance", value:sym+fmt(totalCash,0), sub:selectedCcy, icon:"◇", iconBg:"rgba(6,27,51,0.08)", iconColor:C.navy},
         ].map(s=>(
-          <div key={s.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:"16px 18px",boxShadow:"0 2px 8px rgba(6,27,51,0.06)"}}>
-            <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:C.faint,marginBottom:8}}>{s.label}</div>
-            <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?20:26,fontWeight:700,color:C.navy,letterSpacing:-0.5,lineHeight:1}}>{s.value}</div>
-            <div style={{fontSize:11,color:C.faint,marginTop:4}}>{s.sub}</div>
+          <div key={s.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,padding:"16px 18px",boxShadow:"0 2px 8px rgba(6,27,51,0.06)",display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:C.faint,marginBottom:8}}>{s.label}</div>
+              <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?18:24,fontWeight:700,color:C.navy,letterSpacing:-0.5,lineHeight:1}}>{s.value}</div>
+              <div style={{fontSize:11,color:C.faint,marginTop:4}}>{s.sub}</div>
+            </div>
+            <div style={{width:42,height:42,borderRadius:10,background:s.iconBg,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+              <span style={{fontSize:20,color:s.iconColor}}>{s.icon}</span>
+            </div>
           </div>
         ))}
       </div>
@@ -478,37 +488,7 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
         </div>
       )}
 
-      <div style={{display:"flex",flexDirection:"column",gap:0,marginBottom:14,background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden"}}>
-        {clients.map(c => {
-          const val = valuations[c.id];
-          const aum = val ? convertAmount(val.totalAssetValuation, val.currency||"USD", selectedCcy) : 0;
-          const liab = val ? convertAmount(val.totalLiabilities, val.currency||"USD", selectedCcy) : 0;
-          const net = aum - liab;
-          return (
-            <div key={c.id} onClick={()=>{setSelectedClient(c.id);setSection("clients");}}
-              style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 14px",cursor:"pointer",borderBottom:"0.5px solid "+C.silver,background:"transparent"}}
-              onMouseEnter={e=>e.currentTarget.style.background=C.tealLight}
-              onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-              <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
-                <div style={{width:32,height:32,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:11,fontWeight:700,flexShrink:0}}>
-                  {c.name ? c.name.trim().split(" ").filter(Boolean).map(n=>n[0]).join("").slice(0,2) : "?"}
-                </div>
-                <div style={{minWidth:0}}>
-                  <div style={{fontWeight:600,color:C.navy,fontSize:13,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name||"Unknown"}</div>
-                  <div style={{fontSize:10,color:C.faint}}>{String(c.primaryCode||"")} · {c.jurisdiction||""}</div>
-                </div>
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:16,flexShrink:0}}>
-                <div style={{textAlign:"right"}}>
-                  <div style={{fontWeight:600,color:C.navy,fontSize:13}}>{sym}{fmt(aum,0)}</div>
-                  <div style={{fontSize:10,color:C.red}}>{sym}{fmt(liab,0)} liab</div>
-                </div>
-                <Badge color={c.verified?"success":"warning"}>{c.verified?"Verified":"Pending"}</Badge>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+
     </div>
   );
 };
