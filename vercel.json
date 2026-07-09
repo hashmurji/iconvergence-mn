@@ -1,6 +1,5 @@
 {
   "version": 2,
-  "buildCommand": "cd /vercel/path0 && npm run build",
   "outputDirectory": "dist",
   "rewrites": [
     {
@@ -13,11 +12,9 @@
     }
   ],
   "functions": {
-    "api/onedrive.js": {
-      "maxDuration": 60
-    },
-    "api/auth0users.js": {
-      "maxDuration": 30
-    }
+    "api/onedrive.js": { "maxDuration": 60 },
+    "api/clientdetail.js": { "maxDuration": 60 },
+    "api/dashboardstats.js": { "maxDuration": 30 },
+    "api/auth0users.js": { "maxDuration": 30 }
   }
 }
