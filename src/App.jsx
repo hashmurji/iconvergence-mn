@@ -1213,7 +1213,7 @@ const DocumentsTab = ({clientId, isAdviser, liveDocuments}) => {
 };
 
 // --- CLIENT PORTAL ----------------------------------------------------------
-const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: propHoldings, valuations: propValuations, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, liveDocuments, clients: propClients}) => {
+const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: propHoldings, valuations: propValuations, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, liveDocuments, clients: propClients, previewClientObj}) => {
   const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
   const [search, setSearch] = useState("");
@@ -1228,10 +1228,10 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
   useEffect(() => {
     if (!clientId0) return;
     setDetailLoading(true); setDetailData(null);
-    fetch("/api/clientdetail?clientId="+clientId0).then(r=>r.json()).then(d=>{ if(!d.error) setDetailData(d); }).catch(()=>{}).finally(()=>setDetailLoading(false));
+    fetch("/api/clientdetail?clientId="+clientId0, {headers: getAuthHeaders()}).then(r=>r.json()).then(d=>{ if(!d.error) setDetailData(d); }).catch(()=>{}).finally(()=>setDetailLoading(false));
   }, [clientId0]);
-  const clientsSourceP = propClients || CLIENTS;
-  const client = clientsSourceP.find(c => c.id === user?.clientId) || clientsSourceP[0];
+  const clientsSourceP0 = propClients || CLIENTS;
+  const client = previewClientObj || clientsSourceP0.find(cl => cl.id === user?.clientId) || clientsSourceP0[0];
   const clientId = client?.id;
   const val = (propValuations || VALUATIONS)[clientId];
   const holdings = (detailData&&detailData.holdings) ? detailData.holdings[clientId]||[] : (propHoldings||HOLDINGS)[clientId]||[];
@@ -1545,7 +1545,7 @@ export default function App() {
   if (!user) return <LoginScreen onLogin={login} loading={loading} error={error}/>;
 
   // Adviser previewing client view
-  if (previewClient) return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} isPreview={true} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments} clients={clients}/>;
+  if (previewClient) { const previewClientObj = clients.find(cl=>cl.id===previewClient); return <ClientPortal user={{...user, clientId: previewClient}} logout={()=>setPreviewClient(null)} selectedCcy={selectedCcy} setCcy={setSelectedCcy} isPreview={true} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments} clients={clients} previewClientObj={previewClientObj}/>; }
 
   // Client role - show client portal only
   if (user.isClient && !user.isAdviser) return <ClientPortal user={user} logout={logout} selectedCcy={selectedCcy} setCcy={setSelectedCcy} holdings={holdings} valuations={valuations} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments} clients={clients}/>;

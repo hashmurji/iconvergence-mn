@@ -1,11 +1,4 @@
 // api/dashboardstats.js
-// Returns aggregate stats for the dashboard:
-// - Total AUM (sum of total_brite_assets per currency, FX to selected)
-// - Total beneficiaries (count of client_ids in clients)
-// - Active clients (count where status = active)
-// - Cash balance (sum of total_cash_balance per currency)
-// - Top trustees by AUM (from financial_accounts)
-
 import { pool } from "../lib/db.js";
 import { requireAuth } from "../lib/auth.js";
 
@@ -15,93 +8,90 @@ export default async function handler(req, res) {
   try {
     await requireAuth(req);
 
-    // Run all queries in parallel
-    const [
-      aumResult,
-      cashResult,
-      beneficiariesResult,
-      activeResult,
-      trusteesResult,
-      stockTypeResult,
-    ] = await Promise.all([
-      // Total AUM - sum of total_brite_assets grouped by currency
+    const [aumResult, cashResult, beneficiariesResult, activeResult, trusteesResult, stockTypeResult] = await Promise.all([
+
+      // Total AUM - total_brite_assets cast from text
       pool.query(`
-        SELECT currency, SUM(total_brite_assets) as total
+        SELECT currency,
+               SUM(total_brite_assets::text::numeric) as total
         FROM valuations
-        WHERE total_brite_assets IS NOT NULL
+        WHERE total_brite_assets IS NOT NULL AND total_brite_assets::text != ''
         GROUP BY currency
-      `).catch(() => ({ rows: [] })),
+      `).catch(e => { console.error('aum:', e.message); return { rows: [] }; }),
 
-      // Cash balance - sum of total_cash_balance grouped by currency
+      // Cash balance - cast from text
       pool.query(`
-        SELECT currency, SUM(total_cash_balance) as total
+        SELECT currency,
+               SUM(total_cash_balance::text::numeric) as total
         FROM valuations
-        WHERE total_cash_balance IS NOT NULL
+        WHERE total_cash_balance IS NOT NULL AND total_cash_balance::text != ''
         GROUP BY currency
-      `).catch(() => ({ rows: [] })),
+      `).catch(e => { console.error('cash:', e.message); return { rows: [] }; }),
 
-      // Total beneficiaries - count of distinct client_ids in clients
+      // Total beneficiaries
+      pool.query(`SELECT COUNT(DISTINCT client_id) as total FROM clients`)
+        .catch(() => ({ rows: [{ total: 0 }] })),
+
+      // Active clients
+      pool.query(`SELECT COUNT(*) as total FROM clients WHERE LOWER(status::text) = 'active'`)
+        .catch(() => ({ rows: [{ total: 0 }] })),
+
+      // Top trustees - cast total_value from text
       pool.query(`
-        SELECT COUNT(DISTINCT client_id) as total FROM clients
-      `),
+        SELECT trustee::text as trustee,
+               fa_currency::text as fa_currency,
+               SUM(total_value::text::numeric) as total_aum,
+               COUNT(DISTINCT client_id::text) as beneficiaries
+        FROM financial_accounts
+        WHERE trustee IS NOT NULL
+          AND trustee::text != ''
+          AND total_value IS NOT NULL
+          AND total_value::text != ''
+        GROUP BY trustee, fa_currency
+        ORDER BY total_aum DESC NULLS LAST
+      `).catch(e => { console.error('trustees:', e.message); return { rows: [] }; }),
 
-      // Active clients - count where status = 'active' (case insensitive)
-      pool.query(`
-        SELECT COUNT(*) as total FROM clients
-        WHERE LOWER(status) = 'active'
-      `),
-
-      // AUM by stock type from holdings with safe cast
+      // AUM by stock type - cast market_value from text
       pool.query(`
         SELECT
-          COALESCE(NULLIF(TRIM(CAST(stock_type AS TEXT)), ''), 'Other') as stock_type,
-          COALESCE(NULLIF(TRIM(CAST(market_value_currency AS TEXT)), ''), 'USD') as market_value_currency,
-          SUM(CASE WHEN market_value::text ~ '^[0-9.]+$' THEN market_value::text::numeric ELSE 0 END) as total_value
+          COALESCE(NULLIF(TRIM(stock_type::text), ''), 'Other') as stock_type,
+          COALESCE(NULLIF(TRIM(market_value_currency::text), ''), 'USD') as market_value_currency,
+          SUM(market_value::text::numeric) as total_value
         FROM holdings
         WHERE market_value IS NOT NULL
+          AND market_value::text != ''
+          AND market_value::text != '0'
         GROUP BY stock_type, market_value_currency
-        ORDER BY total_value DESC
-      `).catch(() => ({ rows: [] })),
-
-      // Top trustees - explicit numeric cast
-      pool.query(`
-        SELECT trustee, fa_currency, 
-               SUM(CASE WHEN total_value ~ '^[0-9.]+$' THEN total_value::numeric ELSE 0 END) as total_aum, 
-               COUNT(DISTINCT client_id) as beneficiaries
-        FROM financial_accounts
-        WHERE trustee IS NOT NULL AND trustee != ''
-        GROUP BY trustee, fa_currency
-        ORDER BY total_aum DESC
-      `).catch(() => ({ rows: [] })),
+        ORDER BY total_value DESC NULLS LAST
+      `).catch(e => { console.error('stocktype:', e.message); return { rows: [] }; }),
     ]);
 
-    // Build AUM by currency
+    // AUM by currency
     const aumByCurrency = {};
     for (const r of aumResult.rows) {
       aumByCurrency[r.currency || "USD"] = parseFloat(r.total) || 0;
     }
 
-    // Build cash by currency
+    // Cash by currency
     const cashByCurrency = {};
     for (const r of cashResult.rows) {
       cashByCurrency[r.currency || "USD"] = parseFloat(r.total) || 0;
     }
 
-    // Build trustee list
-    // Aggregate trustees across currencies
+    // Aggregate trustees by name (combine currencies)
     const trusteeMap = {};
     for (const r of trusteesResult.rows) {
-      if (!trusteeMap[r.trustee]) {
-        trusteeMap[r.trustee] = { trustee: r.trustee, amounts: [], beneficiaries: 0 };
-      }
-      trusteeMap[r.trustee].amounts.push({ currency: r.fa_currency || "USD", amount: parseFloat(r.total_aum) || 0 });
-      trusteeMap[r.trustee].beneficiaries = Math.max(trusteeMap[r.trustee].beneficiaries, parseInt(r.beneficiaries) || 0);
+      const name = r.trustee;
+      if (!trusteeMap[name]) trusteeMap[name] = { trustee: name, amounts: [], beneficiaries: 0 };
+      trusteeMap[name].amounts.push({ currency: r.fa_currency || "USD", amount: parseFloat(r.total_aum) || 0 });
+      trusteeMap[name].beneficiaries = Math.max(trusteeMap[name].beneficiaries, parseInt(r.beneficiaries) || 0);
     }
     const trustees = Object.values(trusteeMap)
-      .sort((a,b) => b.amounts.reduce((s,x)=>s+x.amount,0) - a.amounts.reduce((s,x)=>s+x.amount,0))
+      .filter(t => t.trustee)
+      .sort((a, b) => b.amounts.reduce((s, x) => s + x.amount, 0) - a.amounts.reduce((s, x) => s + x.amount, 0))
       .slice(0, 10);
 
-    // Build AUM by stock type
+    // AUM by stock type
     const stockTypeMap = {};
     for (const r of stockTypeResult.rows) {
       const type = r.stock_type || "Other";
@@ -110,7 +100,7 @@ export default async function handler(req, res) {
     }
     const aumByStockType = Object.entries(stockTypeMap)
       .map(([type, amounts]) => ({ type, amounts }))
-      .sort((a,b) => b.amounts.reduce((s,x)=>s+x.amount,0) - a.amounts.reduce((s,x)=>s+x.amount,0));
+      .sort((a, b) => b.amounts.reduce((s, x) => s + x.amount, 0) - a.amounts.reduce((s, x) => s + x.amount, 0));
 
     return res.status(200).json({
       aumByCurrency,
