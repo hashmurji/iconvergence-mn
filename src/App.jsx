@@ -356,6 +356,12 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
   const trustees = dashboardStats ? dashboardStats.trustees : [];
   const trusteeAUM = (t) => (t.amounts||[]).reduce((s,a) => s + convertAmount(parseFloat(a.amount)||0, a.currency||"USD", selectedCcy), 0);
   const grandTrusteeAUM = trustees.reduce((s,t) => s + trusteeAUM(t), 0);
+  const rawStockTypes = dashboardStats ? dashboardStats.aumByStockType || [] : [];
+  const stockTypeAUM = (st) => (st.amounts||[]).reduce((s,a) => s + convertAmount(parseFloat(a.amount)||0, a.currency||"USD", selectedCcy), 0);
+  // Add cash as a stock type entry
+  const stockTypesWithCash = [...rawStockTypes, {type:"Cash", amounts: Object.entries(dashboardStats?.cashByCurrency||{}).map(([currency,amount])=>({currency,amount}))}];
+  const grandStockAUM = stockTypesWithCash.reduce((s,st) => s + stockTypeAUM(st), 0);
+  const CHART_COLORS = ["#10C6C1","#1D7DFF","#22C58B","#F5A623","#FF5A5F","#8B5CF6","#EC4899","#F97316","#06B6D4","#84CC16","#6366F1","#14B8A6"];
 
   const searchResults = useMemo(() => {
     if (!search || search.length < 2) return [];
@@ -443,11 +449,12 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
         ))}
       </div>
 
+      <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"1fr 1fr",gap:14,marginBottom:14,alignItems:"start"}}>
       {trustees && trustees.length > 0 && (
-        <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden",marginBottom:14}}>
+        <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden"}}>
           <div style={{padding:"12px 16px",borderBottom:"0.5px solid "+C.silver,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:13,fontWeight:700,color:C.navy}}>Top Trustees by AUM</div>
-            <button onClick={()=>setSection("clients")} style={{fontSize:11,color:C.teal,fontWeight:600,background:"none",border:"none",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>View all &rarr;</button>
+            <div style={{fontSize:11,color:C.faint}}>in {selectedCcy}</div>
           </div>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
             <thead>
@@ -491,6 +498,49 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
         </div>
       )}
 
+        {/* RIGHT: AUM by Investment Type Donut Chart */}
+        <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden"}}>
+          <div style={{padding:"12px 16px",borderBottom:"0.5px solid "+C.silver,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{fontSize:13,fontWeight:700,color:C.navy}}>AUM by Investment Type</div>
+            <div style={{fontSize:11,color:C.faint}}>{selectedCcy}</div>
+          </div>
+          <div style={{padding:"16px"}}>
+            {stockTypesWithCash.length > 0 && (() => {
+              const sorted = [...stockTypesWithCash].sort((a,b)=>stockTypeAUM(b)-stockTypeAUM(a)).slice(0,10);
+              let cumulative = 0;
+              const segments = sorted.map((st,i)=>{
+                const val = stockTypeAUM(st);
+                const pct = grandStockAUM>0?(val/grandStockAUM*100):0;
+                const start = cumulative;
+                cumulative += pct;
+                return {...st,val,pct,start,color:CHART_COLORS[i%CHART_COLORS.length]};
+              });
+              const size=180,cx=90,cy=90,r=72,inner=40;
+              const polarToXY=(deg,radius)=>{const rad=(deg-90)*Math.PI/180;return [cx+radius*Math.cos(rad),cy+radius*Math.sin(rad)];};
+              const makeArc=(start,end,r)=>{if(end-start>=100)end=start+99.99;const[x1,y1]=polarToXY(start*3.6,r);const[x2,y2]=polarToXY(end*3.6,r);const large=(end-start)>50?1:0;return `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;};
+              return (
+                <div style={{display:"flex",gap:20,alignItems:"center",flexWrap:"wrap"}}>
+                  <svg width={size} height={size} style={{flexShrink:0}}>
+                    {segments.map((seg,i)=>(<path key={i} d={makeArc(seg.start,seg.start+seg.pct,r)} fill={seg.color} opacity={0.9}/>))}
+                    <circle cx={cx} cy={cy} r={inner} fill="white"/>
+                    <text x={cx} y={cy-7} textAnchor="middle" fontSize="12" fontWeight="700" fill="#061B33">{sym}{fmt(grandStockAUM/1000000,1)}M</text>
+                    <text x={cx} y={cy+9} textAnchor="middle" fontSize="9" fill="#5B6B84">Total AUM</text>
+                  </svg>
+                  <div style={{flex:1,minWidth:120}}>
+                    {segments.map((seg,i)=>(
+                      <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+                        <div style={{width:10,height:10,borderRadius:3,background:seg.color,flexShrink:0}}/>
+                        <div style={{flex:1,fontSize:11,color:C.navy,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{seg.type}</div>
+                        <span style={{fontSize:11,fontWeight:600,color:C.navy,flexShrink:0}}>{seg.pct.toFixed(1)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      </div>
 
     </div>
   );

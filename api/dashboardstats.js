@@ -22,6 +22,7 @@ export default async function handler(req, res) {
       beneficiariesResult,
       activeResult,
       trusteesResult,
+      stockTypeResult,
     ] = await Promise.all([
       // Total AUM - sum of total_brite_assets grouped by currency
       pool.query(`
@@ -49,6 +50,18 @@ export default async function handler(req, res) {
         SELECT COUNT(*) as total FROM clients
         WHERE LOWER(status) = 'active'
       `),
+
+      // AUM by stock type from holdings
+      pool.query(`
+        SELECT 
+          COALESCE(NULLIF(TRIM(stock_type), ''), 'Other') as stock_type,
+          market_value_currency,
+          SUM(market_value::numeric) as total_value
+        FROM holdings
+        WHERE market_value IS NOT NULL AND market_value != 0
+        GROUP BY stock_type, market_value_currency
+        ORDER BY total_value DESC
+      `).catch(() => ({ rows: [] })),
 
       // Top trustees by AUM - group by trustee only, aggregate currencies
       pool.query(`
@@ -91,12 +104,22 @@ export default async function handler(req, res) {
       beneficiaries: parseInt(r.beneficiaries) || 0,
     }));
 
+    // Build AUM by stock type (aggregate currencies as array for FX on frontend)
+    const stockTypeMap = {};
+    for (const r of stockTypeResult.rows) {
+      const type = r.stock_type;
+      if (!stockTypeMap[type]) stockTypeMap[type] = [];
+      stockTypeMap[type].push({ currency: r.market_value_currency || "USD", amount: parseFloat(r.total_value) || 0 });
+    }
+    const aumByStockType = Object.entries(stockTypeMap).map(([type, amounts]) => ({ type, amounts }));
+
     return res.status(200).json({
       aumByCurrency,
       cashByCurrency,
       totalBeneficiaries: parseInt(beneficiariesResult.rows[0]?.total) || 0,
       activeClients: parseInt(activeResult.rows[0]?.total) || 0,
       trustees,
+      aumByStockType,
       lastUpdated: new Date().toISOString(),
     });
 
