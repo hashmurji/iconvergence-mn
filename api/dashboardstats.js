@@ -53,35 +53,23 @@ export default async function handler(req, res) {
 
       // AUM by stock type from holdings
       pool.query(`
-        SELECT 
-          COALESCE(NULLIF(TRIM(stock_type), ''), 'Other') as stock_type,
-          market_value_currency,
-          SUM(market_value::numeric) as total_value
+        SELECT
+          COALESCE(NULLIF(TRIM(CAST(stock_type AS TEXT)), ''), 'Other') as stock_type,
+          COALESCE(NULLIF(TRIM(CAST(market_value_currency AS TEXT)), ''), 'USD') as market_value_currency,
+          SUM(CAST(market_value AS NUMERIC)) as total_value
         FROM holdings
-        WHERE market_value IS NOT NULL AND market_value != 0
+        WHERE market_value IS NOT NULL AND CAST(market_value AS NUMERIC) != 0
         GROUP BY stock_type, market_value_currency
         ORDER BY total_value DESC
       `).catch(() => ({ rows: [] })),
 
-      // Top trustees by AUM - group by trustee only, aggregate currencies
+      // Top trustees - simple per trustee/currency rows
       pool.query(`
-        SELECT 
-          trustee,
-          json_agg(json_build_object('currency', fa_currency, 'amount', total_aum)) as amounts,
-          SUM(beneficiaries) as beneficiaries
-        FROM (
-          SELECT 
-            trustee,
-            fa_currency,
-            SUM(total_value) as total_aum,
-            COUNT(DISTINCT client_id) as beneficiaries
-          FROM financial_accounts
-          WHERE trustee IS NOT NULL AND trustee != ''
-          GROUP BY trustee, fa_currency
-        ) sub
-        GROUP BY trustee
-        ORDER BY SUM(total_aum) DESC
-        LIMIT 10
+        SELECT trustee, fa_currency, SUM(total_value) as total_aum, COUNT(DISTINCT client_id) as beneficiaries
+        FROM financial_accounts
+        WHERE trustee IS NOT NULL AND trustee != ''
+        GROUP BY trustee, fa_currency
+        ORDER BY trustee, total_aum DESC
       `).catch(() => ({ rows: [] })),
     ]);
 
@@ -98,20 +86,29 @@ export default async function handler(req, res) {
     }
 
     // Build trustee list
-    const trustees = trusteesResult.rows.map(r => ({
-      trustee: r.trustee,
-      amounts: r.amounts || [],  // array of {currency, amount} for FX conversion
-      beneficiaries: parseInt(r.beneficiaries) || 0,
-    }));
+    // Aggregate trustees across currencies
+    const trusteeMap = {};
+    for (const r of trusteesResult.rows) {
+      if (!trusteeMap[r.trustee]) {
+        trusteeMap[r.trustee] = { trustee: r.trustee, amounts: [], beneficiaries: 0 };
+      }
+      trusteeMap[r.trustee].amounts.push({ currency: r.fa_currency || "USD", amount: parseFloat(r.total_aum) || 0 });
+      trusteeMap[r.trustee].beneficiaries = Math.max(trusteeMap[r.trustee].beneficiaries, parseInt(r.beneficiaries) || 0);
+    }
+    const trustees = Object.values(trusteeMap)
+      .sort((a,b) => b.amounts.reduce((s,x)=>s+x.amount,0) - a.amounts.reduce((s,x)=>s+x.amount,0))
+      .slice(0, 10);
 
-    // Build AUM by stock type (aggregate currencies as array for FX on frontend)
+    // Build AUM by stock type
     const stockTypeMap = {};
     for (const r of stockTypeResult.rows) {
-      const type = r.stock_type;
+      const type = r.stock_type || "Other";
       if (!stockTypeMap[type]) stockTypeMap[type] = [];
       stockTypeMap[type].push({ currency: r.market_value_currency || "USD", amount: parseFloat(r.total_value) || 0 });
     }
-    const aumByStockType = Object.entries(stockTypeMap).map(([type, amounts]) => ({ type, amounts }));
+    const aumByStockType = Object.entries(stockTypeMap)
+      .map(([type, amounts]) => ({ type, amounts }))
+      .sort((a,b) => b.amounts.reduce((s,x)=>s+x.amount,0) - a.amounts.reduce((s,x)=>s+x.amount,0));
 
     return res.status(200).json({
       aumByCurrency,
