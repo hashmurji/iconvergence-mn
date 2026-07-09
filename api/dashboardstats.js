@@ -50,17 +50,24 @@ export default async function handler(req, res) {
         WHERE LOWER(status) = 'active'
       `),
 
-      // Top trustees by AUM - sum of total_value grouped by trustee, with beneficiary count
+      // Top trustees by AUM - group by trustee only, aggregate currencies
       pool.query(`
         SELECT 
           trustee,
-          fa_currency,
-          SUM(total_value) as total_aum,
-          COUNT(DISTINCT client_id) as beneficiaries
-        FROM financial_accounts
-        WHERE trustee IS NOT NULL AND trustee != ''
-        GROUP BY trustee, fa_currency
-        ORDER BY total_aum DESC
+          json_agg(json_build_object('currency', fa_currency, 'amount', total_aum)) as amounts,
+          SUM(beneficiaries) as beneficiaries
+        FROM (
+          SELECT 
+            trustee,
+            fa_currency,
+            SUM(total_value) as total_aum,
+            COUNT(DISTINCT client_id) as beneficiaries
+          FROM financial_accounts
+          WHERE trustee IS NOT NULL AND trustee != ''
+          GROUP BY trustee, fa_currency
+        ) sub
+        GROUP BY trustee
+        ORDER BY SUM(total_aum) DESC
         LIMIT 10
       `).catch(() => ({ rows: [] })),
     ]);
@@ -80,8 +87,7 @@ export default async function handler(req, res) {
     // Build trustee list
     const trustees = trusteesResult.rows.map(r => ({
       trustee: r.trustee,
-      currency: r.fa_currency || "USD",
-      totalAum: parseFloat(r.total_aum) || 0,
+      amounts: r.amounts || [],  // array of {currency, amount} for FX conversion
       beneficiaries: parseInt(r.beneficiaries) || 0,
     }));
 

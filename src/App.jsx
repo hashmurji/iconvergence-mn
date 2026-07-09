@@ -354,7 +354,8 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
   const totalBeneficiaries = dashboardStats ? dashboardStats.totalBeneficiaries : clients.length;
   const activeClients = dashboardStats ? dashboardStats.activeClients : clients.length;
   const trustees = dashboardStats ? dashboardStats.trustees : [];
-  const grandTrusteeAUM = trustees.reduce((s,t) => s + convertAmount(t.totalAum, t.currency, selectedCcy), 0);
+  const trusteeAUM = (t) => (t.amounts||[]).reduce((s,a) => s + convertAmount(parseFloat(a.amount)||0, a.currency||"USD", selectedCcy), 0);
+  const grandTrusteeAUM = trustees.reduce((s,t) => s + trusteeAUM(t), 0);
 
   const searchResults = useMemo(() => {
     if (!search || search.length < 2) return [];
@@ -446,38 +447,40 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
         <div style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:12,overflow:"hidden",marginBottom:14}}>
           <div style={{padding:"12px 16px",borderBottom:"0.5px solid "+C.silver,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
             <div style={{fontSize:13,fontWeight:700,color:C.navy}}>Top Trustees by AUM</div>
-            <div style={{fontSize:11,color:C.faint}}>{selectedCcy}</div>
+            <button onClick={()=>setSection("clients")} style={{fontSize:11,color:C.teal,fontWeight:600,background:"none",border:"none",cursor:"pointer",fontFamily:"'Inter',sans-serif"}}>View all &rarr;</button>
           </div>
-          <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
             <thead>
               <tr style={{background:C.silver}}>
-                {["Trustee","Beneficiaries","AUM","% of Total"].map(h=>(
-                  <th key={h} style={{textAlign:"left",padding:"8px 16px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                {["Trustee","Clients","AUM ("+selectedCcy+")","% of Total"].map(h=>(
+                  <th key={h} style={{textAlign:"left",padding:"6px 12px",fontSize:9,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {trustees.map((t,i) => {
-                const aum = convertAmount(t.totalAum, t.currency, selectedCcy);
+                const aum = trusteeAUM(t);
                 const pct = grandTrusteeAUM > 0 ? (aum/grandTrusteeAUM*100).toFixed(1) : "0.0";
+                const colors = ["#10C6C1","#1D7DFF","#22C58B","#F5A623","#FF5A5F","#8B5CF6","#EC4899","#F97316","#06B6D4","#84CC16"];
+                const bgColor = colors[i % colors.length];
                 return (
-                  <tr key={t.trustee} style={{borderBottom:"0.5px solid "+C.silver,background:i%2===0?C.white:"#F8FAFC"}}>
-                    <td style={{padding:"11px 16px"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:10}}>
-                        <div style={{width:30,height:30,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:10,fontWeight:700,flexShrink:0}}>
-                          {t.trustee.trim().split(" ").filter(Boolean).map(n=>n[0]).join("").slice(0,2).toUpperCase()}
+                  <tr key={t.trustee} style={{borderBottom:"0.5px solid "+C.silver}}>
+                    <td style={{padding:"8px 12px"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <div style={{width:28,height:28,borderRadius:8,background:bgColor,display:"flex",alignItems:"center",justifyContent:"center",color:"white",fontSize:9,fontWeight:700,flexShrink:0,letterSpacing:0.5}}>
+                          {t.trustee.trim().split(" ").filter(Boolean).map(n=>n[0]).join("").slice(0,3).toUpperCase()}
                         </div>
-                        <span style={{fontWeight:600,color:C.navy}}>{t.trustee}</span>
+                        <span style={{fontWeight:600,color:C.navy,fontSize:12}}>{t.trustee}</span>
                       </div>
                     </td>
-                    <td style={{padding:"11px 16px",color:C.text}}>{t.beneficiaries.toLocaleString()}</td>
-                    <td style={{padding:"11px 16px",fontWeight:600,color:C.navy}}>{sym}{fmt(aum,0)}</td>
-                    <td style={{padding:"11px 16px"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <div style={{flex:1,height:4,background:C.silver,borderRadius:2,maxWidth:80}}>
-                          <div style={{width:Math.min(parseFloat(pct),100)+"%",height:"100%",background:C.teal,borderRadius:2}}/>
+                    <td style={{padding:"8px 12px",color:C.text}}>{t.beneficiaries.toLocaleString()}</td>
+                    <td style={{padding:"8px 12px",fontWeight:600,color:C.navy}}>{sym}{fmt(aum,0)}</td>
+                    <td style={{padding:"8px 12px",minWidth:100}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
+                        <div style={{flex:1,height:3,background:C.silver,borderRadius:2}}>
+                          <div style={{width:Math.min(parseFloat(pct),100)+"%",height:"100%",background:bgColor,borderRadius:2}}/>
                         </div>
-                        <span style={{fontSize:12,color:C.faint,minWidth:35}}>{pct}%</span>
+                        <span style={{fontSize:11,color:C.faint,minWidth:30,textAlign:"right"}}>{pct}%</span>
                       </div>
                     </td>
                   </tr>
