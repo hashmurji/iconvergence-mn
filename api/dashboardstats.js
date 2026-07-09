@@ -29,7 +29,7 @@ export default async function handler(req, res) {
         FROM valuations
         WHERE total_brite_assets IS NOT NULL
         GROUP BY currency
-      `),
+      `).catch(() => ({ rows: [] })),
 
       // Cash balance - sum of total_cash_balance grouped by currency
       pool.query(`
@@ -37,7 +37,7 @@ export default async function handler(req, res) {
         FROM valuations
         WHERE total_cash_balance IS NOT NULL
         GROUP BY currency
-      `),
+      `).catch(() => ({ rows: [] })),
 
       // Total beneficiaries - count of distinct client_ids in clients
       pool.query(`
@@ -62,7 +62,7 @@ export default async function handler(req, res) {
         GROUP BY trustee, fa_currency
         ORDER BY total_aum DESC
         LIMIT 10
-      `),
+      `).catch(() => ({ rows: [] })),
     ]);
 
     // Build AUM by currency
