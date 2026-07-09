@@ -115,19 +115,24 @@ const useDashboardStats = () => {
   const [loading, setLoading] = useState(true);
   const fetchStats = (bust=false) => {
     setLoading(true);
-    try {
-      const stored = sessionStorage.getItem("mn_auth");
-      const token = stored ? JSON.parse(stored).accessToken : null;
-      const headers = token ? { Authorization: "Bearer " + token } : {};
-      fetch("/api/dashboardstats"+(bust?"?t="+Date.now():""), { headers })
-        .then(r=>r.json())
-        .then(d=>{ if(!d.error) setStats(d); })
-        .catch(()=>{})
-        .finally(()=>setLoading(false));
-    } catch(e) { setLoading(false); }
+    const token = getStoredAccessToken();
+    const headers = token ? { Authorization: "Bearer " + token } : {};
+    fetch("/api/dashboardstats"+(bust?"?t="+Date.now():""), { headers })
+      .then(r=>r.json())
+      .then(d=>{ if(!d.error) setStats(d); })
+      .catch(()=>{})
+      .finally(()=>setLoading(false));
   };
   useEffect(()=>{ fetchStats(); }, []);
   return { stats, loading, refresh: ()=>fetchStats(true) };
+};
+
+const getAuthHeaders = () => {
+  try {
+    const stored = sessionStorage.getItem("mn_auth");
+    const token = stored ? JSON.parse(stored).accessToken : null;
+    return token ? { Authorization: "Bearer " + token } : {};
+  } catch(e) { return {}; }
 };
 
 const useOneDriveData = () => {
@@ -553,7 +558,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
   useEffect(() => {
     if (!clientId) return;
     setDetailLoading(true); setDetailData(null);
-    fetch("/api/clientdetail?clientId="+clientId).then(r=>r.json()).then(d=>{ if(!d.error) setDetailData(d); }).catch(()=>{}).finally(()=>setDetailLoading(false));
+    fetch("/api/clientdetail?clientId="+clientId, {headers: getAuthHeaders()}).then(r=>r.json()).then(d=>{ if(!d.error) setDetailData(d); }).catch(()=>{}).finally(()=>setDetailLoading(false));
   }, [clientId]);
     const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
