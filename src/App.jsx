@@ -110,21 +110,21 @@ const getStoredAccessToken = () => {
   } catch (e) { return null; }
 };
 
-const useDashboardStats = () => {
+const useDashboardStats = (token) => {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const fetchStats = (bust=false) => {
+  const fetchStats = (bust=false, t=token) => {
+    if (!t) { setLoading(false); return; }
     setLoading(true);
-    const token = getStoredAccessToken();
-    const headers = token ? { Authorization: "Bearer " + token } : {};
+    const headers = { Authorization: "Bearer " + t };
     fetch("/api/dashboardstats"+(bust?"?t="+Date.now():""), { headers })
       .then(r=>r.json())
       .then(d=>{ if(!d.error) setStats(d); })
       .catch(()=>{})
       .finally(()=>setLoading(false));
   };
-  useEffect(()=>{ fetchStats(); }, []);
-  return { stats, loading, refresh: ()=>fetchStats(true) };
+  useEffect(()=>{ fetchStats(false, token); }, [token]);
+  return { stats, loading, refresh: ()=>fetchStats(true, token) };
 };
 
 const getAuthHeaders = () => {
@@ -135,18 +135,19 @@ const getAuthHeaders = () => {
   } catch(e) { return {}; }
 };
 
-const useOneDriveData = () => {
+const useOneDriveData = (token) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
 
-  const fetchData = async (forceRefresh=false) => {
+  const fetchData = async (forceRefresh=false, t=token) => {
+    if (!t) { setLoading(false); return; }
     setLoading(true);
     setError(null);
     try {
       const bust = forceRefresh ? '?t='+Date.now() : '';
-      const authHeader = { Authorization: "Bearer " + (getStoredAccessToken() || "") };
+      const authHeader = { Authorization: "Bearer " + t };
       const [cr, vr, hr, wr, dr, tr, docr] = await Promise.all([
         fetch("/api/clients"+bust, { headers: authHeader }),
         fetch("/api/valuations"+bust, { headers: authHeader }),
@@ -182,7 +183,7 @@ const useOneDriveData = () => {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(false, token); }, [token]);
 
   return { data, loading, error, lastUpdated, refresh: (force=false) => fetchData(force) };
 };
@@ -1499,8 +1500,9 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
 // --- APP ---------------------------------------------------------------------
 export default function App() {
   const {user, loading: authLoading, error: authError, login, logout} = useAuth();
-  const {data: liveData, loading: dataLoading, error: dataError, lastUpdated, refresh} = useOneDriveData();
-  const {stats: dashboardStats, refresh: refreshStats} = useDashboardStats();
+  const accessToken = user?.accessToken || getStoredAccessToken();
+  const {data: liveData, loading: dataLoading, error: dataError, lastUpdated, refresh} = useOneDriveData(accessToken);
+  const {stats: dashboardStats, refresh: refreshStats} = useDashboardStats(accessToken);
   const [section, setSection] = useState("dashboard");
   const [selectedClient, setSelectedClient] = useState(null);
   const [selectedCcy, setSelectedCcy] = useState("USD");
