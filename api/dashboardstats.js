@@ -51,25 +51,27 @@ export default async function handler(req, res) {
         WHERE LOWER(status) = 'active'
       `),
 
-      // AUM by stock type from holdings
+      // AUM by stock type from holdings with safe cast
       pool.query(`
         SELECT
           COALESCE(NULLIF(TRIM(CAST(stock_type AS TEXT)), ''), 'Other') as stock_type,
           COALESCE(NULLIF(TRIM(CAST(market_value_currency AS TEXT)), ''), 'USD') as market_value_currency,
-          SUM(CAST(market_value AS NUMERIC)) as total_value
+          SUM(CASE WHEN market_value::text ~ '^[0-9.]+$' THEN market_value::text::numeric ELSE 0 END) as total_value
         FROM holdings
-        WHERE market_value IS NOT NULL AND CAST(market_value AS NUMERIC) != 0
+        WHERE market_value IS NOT NULL
         GROUP BY stock_type, market_value_currency
         ORDER BY total_value DESC
       `).catch(() => ({ rows: [] })),
 
-      // Top trustees - simple per trustee/currency rows
+      // Top trustees - explicit numeric cast
       pool.query(`
-        SELECT trustee, fa_currency, SUM(total_value) as total_aum, COUNT(DISTINCT client_id) as beneficiaries
+        SELECT trustee, fa_currency, 
+               SUM(CASE WHEN total_value ~ '^[0-9.]+$' THEN total_value::numeric ELSE 0 END) as total_aum, 
+               COUNT(DISTINCT client_id) as beneficiaries
         FROM financial_accounts
         WHERE trustee IS NOT NULL AND trustee != ''
         GROUP BY trustee, fa_currency
-        ORDER BY trustee, total_aum DESC
+        ORDER BY total_aum DESC
       `).catch(() => ({ rows: [] })),
     ]);
 
