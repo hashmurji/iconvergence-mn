@@ -759,19 +759,19 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
                 <tr><td colSpan={6} style={{padding:24,textAlign:"center",color:C.faint}}>No withdrawals recorded</td></tr>
               ) : withdrawals.map((w,i)=>(
                 <tr key={i} style={{borderBottom:"0.5px solid "+C.silver}}>
-                  <td style={{padding:"10px 12px",color:C.text}}>{w.dateRequested}</td>
-                  <td style={{padding:"10px 12px"}}><Badge color="info">{w.type}</Badge></td>
-                  <td style={{padding:"10px 12px",color:C.faint}}>{w.currency}</td>
-                  <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>${fmt(w.requestedAmount,2)}</td>
-                  <td style={{padding:"10px 12px",fontWeight:600,color:C.green}}>${fmt(w.actualPaid,2)}</td>
-                  <td style={{padding:"10px 12px",color:C.text}}>{w.paymentDate}</td>
+                  <td style={{padding:"10px 12px",color:C.text}}>{w.dateRequested ? new Date(w.dateRequested).toLocaleDateString("en-GB") : ""}</td>
+                  <td style={{padding:"10px 12px"}}><Badge color="info">{w.type||"—"}</Badge></td>
+                  <td style={{padding:"10px 12px",color:C.faint}}>{w.currency||"—"}</td>
+                  <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>${fmt(parseFloat(w.requestedAmount)||0,2)}</td>
+                  <td style={{padding:"10px 12px",fontWeight:600,color:C.green}}>${fmt(parseFloat(w.actualPaid)||0,2)}</td>
+                  <td style={{padding:"10px 12px",color:C.text}}>{w.paymentDate ? new Date(w.paymentDate).toLocaleDateString("en-GB") : "—"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
           <div style={{marginTop:16,background:C.silver,borderRadius:8,padding:"12px 16px",display:"flex",justifyContent:"space-between"}}>
             <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Total paid</span>
-            <span style={{fontFamily:"Inter,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>${fmt(withdrawals.reduce((s,w)=>s+w.actualPaid,0),2)}</span>
+            <span style={{fontFamily:"Inter,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>${fmt(withdrawals.reduce((s,w)=>s+(parseFloat(w.actualPaid)||0),0),2)}</span>
           </div>
         </div>
       )}
@@ -791,7 +791,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
                   <div style={{fontSize:12,color:C.faint}}>Date: {dist.date} · {dist.payments.length} payment{dist.payments.length!==1?"s":""}</div>
                 </div>
                 <div style={{fontFamily:"Inter,sans-serif",fontSize:20,fontWeight:700,color:C.navy}}>
-                  ${fmt(dist.payments.reduce((s,p)=>s+p.amount,0),2)}
+                  ${fmt(dist.payments.reduce((s,p)=>s+(parseFloat(p.amount)||0),0),2)}
                 </div>
               </div>
               <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
@@ -1230,10 +1230,18 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
   const clientId0 = (clientsSourceP0.find(c => c.id === user?.clientId) || clientsSourceP0[0])?.id;
   const [detailData, setDetailData] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [clientTxns, setClientTxns] = useState([]);
   useEffect(() => {
     if (!clientId0) return;
-    setDetailLoading(true); setDetailData(null);
-    fetch("/api/clientdetail?clientId="+clientId0, {headers: getAuthHeaders()}).then(r=>r.json()).then(d=>{ if(!d.error) setDetailData(d); }).catch(()=>{}).finally(()=>setDetailLoading(false));
+    setDetailLoading(true); setDetailData(null); setClientTxns([]);
+    const headers = getAuthHeaders();
+    Promise.all([
+      fetch("/api/clientdetail?clientId="+clientId0, {headers}).then(r=>r.json()),
+      fetch("/api/transactions?clientId="+clientId0, {headers}).then(r=>r.json()),
+    ]).then(([detail, txData]) => {
+      if (!detail.error) setDetailData(detail);
+      if (txData && txData.txns) setClientTxns(txData.txns);
+    }).catch(()=>{}).finally(()=>setDetailLoading(false));
   }, [clientId0]);
   const client = previewClientObj || clientsSourceP0.find(cl => cl.id === user?.clientId) || clientsSourceP0[0];
   const clientId = client?.id;
@@ -1448,7 +1456,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
             {withdrawals.length>0&&(
               <div style={{marginTop:14,background:C.silver,borderRadius:8,padding:"12px 16px",display:"flex",justifyContent:"space-between"}}>
                 <span style={{fontSize:13,fontWeight:600,color:C.navy}}>Total paid</span>
-                <span style={{fontFamily:"Inter,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>${fmt(withdrawals.reduce((s,w)=>s+w.actualPaid,0),2)}</span>
+                <span style={{fontFamily:"Inter,sans-serif",fontSize:16,fontWeight:700,color:C.navy}}>${fmt(withdrawals.reduce((s,w)=>s+(parseFloat(w.actualPaid)||0),0),2)}</span>
               </div>
             )}
           </div>
@@ -1470,7 +1478,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
                     <div style={{fontSize:12,color:C.faint}}>Date: {dist.date} · {dist.payments.length} payment{dist.payments.length!==1?"s":""}</div>
                   </div>
                   <div style={{fontFamily:"Inter,sans-serif",fontSize:22,fontWeight:700,color:C.navy}}>
-                    ${fmt(dist.payments.reduce((s,p)=>s+p.amount,0),2)}
+                    ${fmt(dist.payments.reduce((s,p)=>s+(parseFloat(p.amount)||0),0),2)}
                   </div>
                 </div>
                 <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
