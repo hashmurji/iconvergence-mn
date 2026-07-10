@@ -148,17 +148,16 @@ const useOneDriveData = (token) => {
     try {
       const bust = forceRefresh ? '?t='+Date.now() : '';
       const authHeader = { Authorization: "Bearer " + t };
-      const [cr, vr, hr, wr, dr, tr, docr] = await Promise.all([
+      const [cr, vr, hr, wr, dr, docr] = await Promise.all([
         fetch("/api/clients"+bust, { headers: authHeader }),
         fetch("/api/valuations"+bust, { headers: authHeader }),
         fetch("/api/holdings"+bust, { headers: authHeader }),
         fetch("/api/withdrawals"+bust, { headers: authHeader }),
         fetch("/api/distributions"+bust, { headers: authHeader }),
-        fetch("/api/transactions"+bust, { headers: authHeader }),
         fetch("/api/documents"+bust, { headers: authHeader }),
       ]);
-      const [cj, vj, hj, wj, dj, tj, docj] = await Promise.all([
-        cr.json(), vr.json(), hr.json(), wr.json(), dr.json(), tr.json(), docr.json()
+      const [cj, vj, hj, wj, dj, docj] = await Promise.all([
+        cr.json(), vr.json(), hr.json(), wr.json(), dr.json(), docr.json()
       ]);
       if (cj.error) throw new Error(cj.error);
       const json = {
@@ -167,7 +166,7 @@ const useOneDriveData = (token) => {
         holdings: hj.holdings || {},
         withdrawals: wj.withdrawals || {},
         distributions: dj.distributions || {},
-        txns: tj.txns || [],
+        txns: [],
         documents: docj.documents || {},
         lastUpdated: cj.lastUpdated,
       };
@@ -556,10 +555,18 @@ const Dashboard = ({setSection, setSelectedClient, selectedCcy, clients: propCli
 const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings: propHoldings, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, valuations: propValuations, clients: propClients, liveDocuments}) => {
   const [detailData, setDetailData] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [clientTxns, setClientTxns] = useState([]);
   useEffect(() => {
     if (!clientId) return;
-    setDetailLoading(true); setDetailData(null);
-    fetch("/api/clientdetail?clientId="+clientId, {headers: getAuthHeaders()}).then(r=>r.json()).then(d=>{ if(!d.error) setDetailData(d); }).catch(()=>{}).finally(()=>setDetailLoading(false));
+    setDetailLoading(true); setDetailData(null); setClientTxns([]);
+    const headers = getAuthHeaders();
+    Promise.all([
+      fetch("/api/clientdetail?clientId="+clientId, {headers}).then(r=>r.json()),
+      fetch("/api/transactions?clientId="+clientId, {headers}).then(r=>r.json()),
+    ]).then(([detail, txData]) => {
+      if (!detail.error) setDetailData(detail);
+      if (txData && txData.txns) setClientTxns(txData.txns);
+    }).catch(()=>{}).finally(()=>setDetailLoading(false));
   }, [clientId]);
     const isMobile = useIsMobile();
   const [tab, setTab] = useState("valuation");
@@ -573,8 +580,8 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
   const holdings = (detailData&&detailData.holdings) ? detailData.holdings[clientId]||[] : (propHoldings||HOLDINGS)[clientId]||[];
   const withdrawals = (detailData&&detailData.withdrawals) ? detailData.withdrawals[clientId]||[] : (propWithdrawals||WITHDRAWALS)[clientId]||[];
   const distributions = (detailData&&detailData.distributions) ? detailData.distributions[clientId]||[] : (propDistributions||DISTRIBUTIONS)[clientId]||[];
-  const allTxns = (detailData&&detailData.txns&&detailData.txns.length>0) ? detailData.txns : (propTxns||TXNS);
-  const txns = allTxns.filter(t => t.clientId === clientId);
+  const allTxns = clientTxns.length > 0 ? clientTxns : (detailData&&detailData.txns&&detailData.txns.length>0) ? detailData.txns : (propTxns||[]);
+  const txns = allTxns.filter(t => (t.clientId || t.client_id) === clientId);
   const resolvedDocuments = (detailData&&detailData.documents) ? detailData.documents : (liveDocuments||{});
 
   const filteredTxns = useMemo(() => {
@@ -720,7 +727,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
               <tbody>
                 {filteredTxns.map(t=>(
                   <tr key={t.id} style={{borderBottom:"0.5px solid "+C.silver}}>
-                    <td style={{padding:"8px 12px",color:C.faint,whiteSpace:"nowrap"}}>{t.tradedate}</td>
+                    <td style={{padding:"8px 12px",color:C.faint,whiteSpace:"nowrap"}}>{t.tradedate ? new Date(t.tradedate).toLocaleDateString("en-GB") : t.tradeDate ? new Date(t.tradeDate).toLocaleDateString("en-GB") : ""}</td>
                     <td style={{padding:"8px 12px"}}><Badge color={t.txtype==="BUY"?"success":t.txtype==="SELL"?"error":t.txtype==="Dividend"?"navy":"info"}>{t.txtype}</Badge></td>
                     <td style={{padding:"8px 12px",fontWeight:600,color:C.navy}}>{t.ticker}</td>
                     <td style={{padding:"8px 12px",color:C.text,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
@@ -1234,8 +1241,8 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
   const holdings = (detailData&&detailData.holdings) ? detailData.holdings[clientId]||[] : (propHoldings||HOLDINGS)[clientId]||[];
   const withdrawals = (detailData&&detailData.withdrawals) ? detailData.withdrawals[clientId]||[] : (propWithdrawals||WITHDRAWALS)[clientId]||[];
   const distributions = (detailData&&detailData.distributions) ? detailData.distributions[clientId]||[] : (propDistributions||DISTRIBUTIONS)[clientId]||[];
-  const allTxns = (detailData&&detailData.txns&&detailData.txns.length>0) ? detailData.txns : (propTxns||TXNS);
-  const txns = allTxns.filter(t => t.clientId === clientId);
+  const allTxns = clientTxns.length > 0 ? clientTxns : (detailData&&detailData.txns&&detailData.txns.length>0) ? detailData.txns : (propTxns||[]);
+  const txns = allTxns.filter(t => (t.clientId || t.client_id) === clientId);
   const resolvedDocuments = (detailData&&detailData.documents) ? detailData.documents : (liveDocuments||{});
 
   const filteredTxns = useMemo(() => {
@@ -1397,7 +1404,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
                 <tbody>
                   {filteredTxns.map(t=>(
                     <tr key={t.id} style={{borderBottom:"0.5px solid "+C.silver}}>
-                      <td style={{padding:"8px 12px",color:C.faint,whiteSpace:"nowrap"}}>{t.tradedate}</td>
+                      <td style={{padding:"8px 12px",color:C.faint,whiteSpace:"nowrap"}}>{t.tradedate ? new Date(t.tradedate).toLocaleDateString("en-GB") : t.tradeDate ? new Date(t.tradeDate).toLocaleDateString("en-GB") : ""}</td>
                       <td style={{padding:"8px 12px"}}><Badge color={t.txtype==="BUY"?"success":t.txtype==="SELL"?"error":t.txtype==="Dividend"?"navy":"info"}>{t.txtype}</Badge></td>
                       <td style={{padding:"8px 12px",fontWeight:600,color:C.navy}}>{t.ticker}</td>
                       <td style={{padding:"8px 12px",color:C.text,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
