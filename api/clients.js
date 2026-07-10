@@ -14,8 +14,7 @@ export default async function handler(req, res) {
 
     let query = `
       SELECT client_id, client_name, reporting_currency, jurisdiction,
-             verified, date_of_birth, email_address, client_address,
-             primary_client_code, status
+             verified, date_of_birth, email_address, client_address, status
       FROM clients
     `;
     const params = [];
@@ -38,7 +37,7 @@ export default async function handler(req, res) {
       dateOfBirth: r.date_of_birth,
       email: r.email_address,
       address: r.client_address,
-      primaryCode: r.primary_client_code,
+      primaryCode: r.client_id,
     }));
 
     res.status(200).json({ clients, lastUpdated: new Date().toISOString() });
