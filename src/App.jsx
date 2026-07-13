@@ -1095,12 +1095,15 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
   // Flatten all accounts across clients
   const allAccounts = Object.values(financialAccounts).flat();
   const filtered = search
-    ? allAccounts.filter(a =>
-        (a.accountNumber||"").toLowerCase().includes(search.toLowerCase()) ||
-        (a.accountName||"").toLowerCase().includes(search.toLowerCase()) ||
-        (a.trustee||"").toLowerCase().includes(search.toLowerCase()) ||
-        (a.clientId||"").toLowerCase().includes(search.toLowerCase())
-      )
+    ? allAccounts.filter(a => {
+        const clientName = getClientName(a.clientId).toLowerCase();
+        const q = search.toLowerCase();
+        return (a.accountNumber||"").toLowerCase().includes(q) ||
+               (a.accountName||"").toLowerCase().includes(q) ||
+               (a.trustee||"").toLowerCase().includes(q) ||
+               (a.clientId||"").toLowerCase().includes(q) ||
+               clientName.includes(q);
+      })
     : allAccounts;
 
   const getClientName = (clientId) => clients.find(c=>c.id===clientId)?.name || clientId;
@@ -1281,7 +1284,7 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
           <thead>
             <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
-              {["Account","Client","Trustee","Currency","Total Value","Asset Valuation","Cash Balance","Surrender Rebate"].map(h=>(
+              {["Client","Account Number","Account Name","Trustee","Currency","Total Value","Asset Valuation","Cash Balance","Surrender Rebate"].map(h=>(
                 <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
               ))}
             </tr>
@@ -1293,10 +1296,18 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
                 onMouseEnter={e=>e.currentTarget.style.background=C.tealLight}
                 onMouseLeave={e=>e.currentTarget.style.background=i%2===0?C.white:"#FAFBFC"}>
                 <td style={{padding:"10px 12px"}}>
-                  <div style={{fontWeight:600,color:C.navy,fontSize:13}}>{a.accountName||a.accountNumber}</div>
-                  <div style={{fontSize:10,color:C.faint,fontFamily:"monospace"}}>{a.accountNumber}</div>
+                  <div style={{display:"flex",alignItems:"center",gap:9}}>
+                    <div style={{width:30,height:30,borderRadius:"50%",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",color:C.white,fontSize:10,fontWeight:700,flexShrink:0}}>
+                      {getClientName(a.clientId).split(" ").filter(Boolean).map(n=>n[0]).join("").slice(0,2).toUpperCase()}
+                    </div>
+                    <div>
+                      <div style={{fontWeight:600,color:C.navy,fontSize:13}}>{getClientName(a.clientId)}</div>
+                      <div style={{fontSize:10,color:C.faint}}>{a.clientId}</div>
+                    </div>
+                  </div>
                 </td>
-                <td style={{padding:"10px 12px",color:C.text,fontSize:12}}>{getClientName(a.clientId)}</td>
+                <td style={{padding:"10px 12px",fontFamily:"monospace",fontSize:12,color:C.navy,fontWeight:600}}>{a.accountNumber}</td>
+                <td style={{padding:"10px 12px",color:C.text,fontSize:12}}>{a.accountName||"—"}</td>
                 <td style={{padding:"10px 12px",color:C.text}}>{a.trustee||"—"}</td>
                 <td style={{padding:"10px 12px",color:C.faint}}>{a.currency}</td>
                 <td style={{padding:"10px 12px",fontWeight:600,color:C.navy,whiteSpace:"nowrap"}}>{sym}{fmt(convertAmount(a.totalValue,a.currency,selectedCcy),0)}</td>
@@ -1850,7 +1861,7 @@ export default function App() {
         {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} clients={clients} valuations={valuations} holdings={holdings} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>}
         {section==="withdrawals" && <WithdrawalsPage selectedCcy={selectedCcy} withdrawals={withdrawals} clients={clients}/>}
         {section==="connect" && <Connect/>}
-        {section==="accounts" && <FinancialAccountsPage selectedCcy={selectedCcy} financialAccounts={financialAccounts} holdings={holdings} clients={clients} getAuthHeaders={getAuthHeaders}/>}
+        {section==="accounts" && <FinancialAccountsPage selectedCcy={selectedCcy} financialAccounts={financialAccounts} holdings={holdings} clients={clients} getAuthHeaders={getAuthHeaders}/>
       </div>
     </div>
   );
