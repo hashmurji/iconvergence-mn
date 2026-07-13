@@ -135,7 +135,7 @@ const getAuthHeaders = () => {
   } catch(e) { return {}; }
 };
 
-const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
 const useInactivityLogout = (logout, enabled) => {
   useEffect(() => {
@@ -191,16 +191,17 @@ const useOneDriveData = (token) => {
     try {
       const bust = forceRefresh ? '?t='+Date.now() : '';
       const authHeader = { Authorization: "Bearer " + t };
-      const [cr, vr, hr, wr, dr, docr] = await Promise.all([
+      const [cr, vr, hr, wr, dr, docr, ar] = await Promise.all([
         fetch("/api/clients"+bust, { headers: authHeader }),
         fetch("/api/valuations"+bust, { headers: authHeader }),
         fetch("/api/holdings"+bust, { headers: authHeader }),
         fetch("/api/withdrawals"+bust, { headers: authHeader }),
         fetch("/api/distributions"+bust, { headers: authHeader }),
         fetch("/api/documents"+bust, { headers: authHeader }),
+        fetch("/api/financialaccounts"+bust, { headers: authHeader }),
       ]);
-      const [cj, vj, hj, wj, dj, docj] = await Promise.all([
-        cr.json(), vr.json(), hr.json(), wr.json(), dr.json(), docr.json()
+      const [cj, vj, hj, wj, dj, docj, aj] = await Promise.all([
+        cr.json(), vr.json(), hr.json(), wr.json(), dr.json(), docr.json(), ar.json()
       ]);
       if (cj.error) throw new Error(cj.error);
       const json = {
@@ -211,6 +212,7 @@ const useOneDriveData = (token) => {
         distributions: dj.distributions || {},
         txns: [],
         documents: docj.documents || {},
+        accounts: aj.accounts || {},
         lastUpdated: cj.lastUpdated,
       };
       setData(json);
@@ -331,6 +333,7 @@ const Nav = ({section, setSection, selectedCcy, setCcy, user, logout}) => {
     {key:"dashboard", label:"Dashboard", icon:"◈"},
     {key:"clients", label:"Clients", icon:"◉"},
     {key:"withdrawals", label:"Withdrawals", icon:"◇"},
+    {key:"accounts", label:"Financial Accounts", icon:"◈"},
     {key:"connect", label:"Connect", icon:"◆"},
     {key:"users", label:"Users", icon:"◎"},
   ];
@@ -1078,6 +1081,237 @@ const Connect = () => {
   );
 };
 
+
+// --- FINANCIAL ACCOUNTS PAGE -------------------------------------------------
+const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, clients, getAuthHeaders}) => {
+  const isMobile = useIsMobile();
+  const sym = CCY_SYMBOLS[selectedCcy] || "$";
+  const [selectedAccount, setSelectedAccount] = useState(null);
+  const [accountTab, setAccountTab] = useState("valuation");
+  const [accountTxns, setAccountTxns] = useState([]);
+  const [txnLoading, setTxnLoading] = useState(false);
+  const [search, setSearch] = useState("");
+
+  // Flatten all accounts across clients
+  const allAccounts = Object.values(financialAccounts).flat();
+  const filtered = search
+    ? allAccounts.filter(a =>
+        (a.accountNumber||"").toLowerCase().includes(search.toLowerCase()) ||
+        (a.accountName||"").toLowerCase().includes(search.toLowerCase()) ||
+        (a.trustee||"").toLowerCase().includes(search.toLowerCase()) ||
+        (a.clientId||"").toLowerCase().includes(search.toLowerCase())
+      )
+    : allAccounts;
+
+  const getClientName = (clientId) => clients.find(c=>c.id===clientId)?.name || clientId;
+
+  // Load transactions when account selected
+  useEffect(() => {
+    if (!selectedAccount) return;
+    setTxnLoading(true);
+    setAccountTxns([]);
+    fetch("/api/transactions?clientId="+selectedAccount.clientId, {headers: getAuthHeaders()})
+      .then(r=>r.json())
+      .then(d => {
+        if (d.txns) {
+          // Filter to just this financial account
+          setAccountTxns(d.txns.filter(t =>
+            (t.financialAccountNumber||t.accountId) === selectedAccount.accountNumber
+          ));
+        }
+      })
+      .catch(()=>{})
+      .finally(()=>setTxnLoading(false));
+  }, [selectedAccount?.accountNumber]);
+
+  if (selectedAccount) {
+    const acct = selectedAccount;
+    const acctHoldings = (holdings[acct.clientId]||[]).filter(h =>
+      h.financialAccountNumber === acct.accountNumber
+    );
+    const acctSym = CCY_SYMBOLS[acct.currency] || acct.currency + " ";
+
+    return (
+      <div style={{padding:isMobile?"12px":24}}>
+        <button onClick={()=>{setSelectedAccount(null);setAccountTab("valuation");setAccountTxns([]);}}
+          style={{background:"none",border:"none",color:C.teal,fontSize:13,cursor:"pointer",marginBottom:14,padding:0,display:"flex",alignItems:"center",gap:4,fontFamily:"'Inter',sans-serif"}}>
+          &larr; All accounts
+        </button>
+
+        <div style={{background:C.navy,borderRadius:12,padding:isMobile?"14px":20,marginBottom:18,display:"flex",flexWrap:"wrap",gap:16,justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{acct.accountName||acct.accountNumber}</div>
+            <div style={{fontSize:12,color:"rgba(255,255,255,0.5)",marginTop:3}}>{acct.accountNumber} · {acct.trustee||"—"} · {getClientName(acct.clientId)}</div>
+          </div>
+          <div style={{display:"flex",gap:isMobile?12:20,flexWrap:"wrap"}}>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Total Value</div>
+              <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.white}}>{sym}{fmt(convertAmount(acct.totalValue,acct.currency,selectedCcy),0)}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:10,fontWeight:600,letterSpacing:2,textTransform:"uppercase",color:"rgba(255,255,255,0.38)"}}>Cash</div>
+              <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?18:22,fontWeight:700,color:C.teal}}>{sym}{fmt(convertAmount(acct.cashBalance,acct.currency,selectedCcy),0)}</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{borderBottom:"1.5px solid "+C.silver,marginBottom:20,display:"flex",overflowX:"auto",gap:0}}>
+          {[["valuation","Valuation"],["holdings","Holdings"],["transactions","Transactions"]].map(([t,label])=>(
+            <button key={t} onClick={()=>setAccountTab(t)}
+              style={{background:"none",border:"none",borderBottom:accountTab===t?"2px solid "+C.teal:"2px solid transparent",color:accountTab===t?C.teal:C.faint,fontSize:13,fontWeight:accountTab===t?600:400,cursor:"pointer",padding:"9px 16px",marginBottom:-1,whiteSpace:"nowrap",fontFamily:"'Inter',sans-serif"}}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Valuation Tab */}
+        {accountTab==="valuation" && (
+          <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(2,1fr)",gap:12}}>
+            <div style={{gridColumn:"1 / -1",fontSize:12,color:C.faint,display:"flex",alignItems:"center",gap:6}}>
+              <span>Reported in</span>
+              <Badge color="navy">{acct.currency||"USD"}</Badge>
+              <span>· Showing in</span>
+              <Badge color="info">{selectedCcy}</Badge>
+            </div>
+            {[
+              {label:"Total Value", value:sym+fmt(convertAmount(acct.totalValue,acct.currency,selectedCcy),2)},
+              {label:"Asset Valuation", value:sym+fmt(convertAmount(acct.assetValuation,acct.currency,selectedCcy),2)},
+              {label:"Cash Balance", value:sym+fmt(convertAmount(acct.cashBalance,acct.currency,selectedCcy),2)},
+              {label:"Remaining Surrender Rebate", value:sym+fmt(convertAmount(acct.remainingSurrenderRebate,acct.currency,selectedCcy),2), red:true},
+              {label:"Funds Received", value:sym+fmt(convertAmount(acct.fundsReceived,acct.currency,selectedCcy),2)},
+            ].map(row=>(
+              <div key={row.label} style={{background:C.white,border:"0.5px solid "+C.silver,borderRadius:10,padding:"14px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{fontSize:13,color:C.faint}}>{row.label}</div>
+                <div style={{fontFamily:"Inter,sans-serif",fontSize:16,fontWeight:600,color:row.red?C.red:C.navy}}>{row.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Holdings Tab */}
+        {accountTab==="holdings" && (
+          <div style={{overflowX:"auto"}}>
+            {acctHoldings.length === 0 ? (
+              <div style={{padding:32,textAlign:"center",color:C.faint}}>No holdings for this account</div>
+            ) : (
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:700}}>
+                <thead>
+                  <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+                    {["Holding","Shares","Purchase Price","CCY","Market Value","CCY","Gain / Loss","% Change"].map(h=>(
+                      <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {acctHoldings.map((h,i)=>(
+                    <tr key={i} style={{borderBottom:"0.5px solid "+C.silver,background:i%2===0?C.white:"#FAFBFC"}}>
+                      <td style={{padding:"10px 12px",fontWeight:600,color:C.navy,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.name}</td>
+                      <td style={{padding:"10px 12px",color:C.text}}>{parseFloat(h.shares||0).toLocaleString()}</td>
+                      <td style={{padding:"10px 12px",color:C.text}}>{h.purchasePrice}</td>
+                      <td style={{padding:"10px 12px",color:C.faint,fontSize:11}}>{h.purchasePriceCurrency}</td>
+                      <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>{h.marketValue}</td>
+                      <td style={{padding:"10px 12px",color:C.faint,fontSize:11}}>{h.marketValueCurrency}</td>
+                      <td style={{padding:"10px 12px",color:posColor(h.pctChange||h.percentChange)}}>{h.gainLoss}</td>
+                      <td style={{padding:"10px 12px"}}>
+                        <span style={{background:posBg(h.pctChange||h.percentChange),color:posColor(h.pctChange||h.percentChange),fontSize:11,fontWeight:600,padding:"2px 7px",borderRadius:100}}>{pct(h.pctChange||parseFloat(h.percentChange)||0)}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* Transactions Tab */}
+        {accountTab==="transactions" && (
+          <div>
+            {txnLoading ? (
+              <div style={{padding:32,display:"flex",alignItems:"center",gap:12}}>
+                <div style={{width:24,height:24,border:"3px solid rgba(0,184,176,0.3)",borderTop:"3px solid #10C6C1",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+                <span style={{color:C.faint,fontSize:14}}>Loading transactions...</span>
+              </div>
+            ) : accountTxns.length === 0 ? (
+              <div style={{padding:32,textAlign:"center",color:C.faint}}>No transactions for this account</div>
+            ) : (
+              <div style={{overflowX:"auto"}}>
+                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:800}}>
+                  <thead>
+                    <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+                      {["Date","Type","Ticker","Description","CCY","Consideration","Net Amount"].map(h=>(
+                        <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {accountTxns.map((t,i)=>(
+                      <tr key={i} style={{borderBottom:"0.5px solid "+C.silver}}>
+                        <td style={{padding:"8px 12px",color:C.faint,whiteSpace:"nowrap"}}>{t.tradeDate ? new Date(t.tradeDate).toLocaleDateString("en-GB") : ""}</td>
+                        <td style={{padding:"8px 12px"}}><Badge color={t.txType==="BUY"?"success":t.txType==="SELL"?"error":t.txType==="Dividend"?"navy":"info"}>{t.txType||t.txtype||"—"}</Badge></td>
+                        <td style={{padding:"8px 12px",fontWeight:600,color:C.navy}}>{t.ticker||"—"}</td>
+                        <td style={{padding:"8px 12px",color:C.text,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
+                        <td style={{padding:"8px 12px",color:C.faint}}>{t.currency||t.ccy}</td>
+                        <td style={{padding:"8px 12px",color:C.navy,fontFamily:"monospace"}}>{fmt(t.consideration,2)}</td>
+                        <td style={{padding:"8px 12px",color:posColor(t.clientNetAmount||t.clientnetamt),fontFamily:"monospace"}}>{(t.clientNetAmount||t.clientnetamt)>=0?"+":""}{fmt(Math.abs(t.clientNetAmount||t.clientnetamt),2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Account list view
+  return (
+    <div style={{padding:isMobile?"12px":24}}>
+      <div style={{marginBottom:16}}>
+        <div style={{fontSize:10,fontWeight:600,letterSpacing:3,textTransform:"uppercase",color:C.teal,marginBottom:3}}>Account Management</div>
+        <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?20:24,fontWeight:600,color:C.navy}}>Financial Accounts</div>
+      </div>
+      <div style={{display:"flex",gap:10,marginBottom:16}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by account number, name, trustee or client ID..."
+          style={{padding:"8px 12px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",flex:1,color:C.navy}}/>
+      </div>
+      <div style={{fontSize:12,color:C.faint,marginBottom:12}}>{filtered.length} account{filtered.length!==1?"s":""}</div>
+      <div style={{overflowX:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
+          <thead>
+            <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
+              {["Account","Client","Trustee","Currency","Total Value","Asset Valuation","Cash Balance","Surrender Rebate"].map(h=>(
+                <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((a,i)=>(
+              <tr key={a.accountNumber||i} onClick={()=>setSelectedAccount(a)}
+                style={{borderBottom:"0.5px solid "+C.silver,cursor:"pointer",background:i%2===0?C.white:"#FAFBFC"}}
+                onMouseEnter={e=>e.currentTarget.style.background=C.tealLight}
+                onMouseLeave={e=>e.currentTarget.style.background=i%2===0?C.white:"#FAFBFC"}>
+                <td style={{padding:"10px 12px"}}>
+                  <div style={{fontWeight:600,color:C.navy,fontSize:13}}>{a.accountName||a.accountNumber}</div>
+                  <div style={{fontSize:10,color:C.faint,fontFamily:"monospace"}}>{a.accountNumber}</div>
+                </td>
+                <td style={{padding:"10px 12px",color:C.text,fontSize:12}}>{getClientName(a.clientId)}</td>
+                <td style={{padding:"10px 12px",color:C.text}}>{a.trustee||"—"}</td>
+                <td style={{padding:"10px 12px",color:C.faint}}>{a.currency}</td>
+                <td style={{padding:"10px 12px",fontWeight:600,color:C.navy,whiteSpace:"nowrap"}}>{sym}{fmt(convertAmount(a.totalValue,a.currency,selectedCcy),0)}</td>
+                <td style={{padding:"10px 12px",color:C.text,whiteSpace:"nowrap"}}>{sym}{fmt(convertAmount(a.assetValuation,a.currency,selectedCcy),0)}</td>
+                <td style={{padding:"10px 12px",color:C.green,whiteSpace:"nowrap"}}>{sym}{fmt(convertAmount(a.cashBalance,a.currency,selectedCcy),0)}</td>
+                <td style={{padding:"10px 12px",color:C.red,whiteSpace:"nowrap"}}>{sym}{fmt(convertAmount(a.remainingSurrenderRebate,a.currency,selectedCcy),0)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 // --- LOGIN -------------------------------------------------------------------
 const LoginScreen = ({onLogin, loading, error}) => (
   <div style={{minHeight:"100vh",background:C.navy,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
@@ -1574,6 +1808,7 @@ export default function App() {
   const distributions = (liveData && liveData.distributions) ? liveData.distributions : DISTRIBUTIONS;
   const txns = (liveData && liveData.txns && liveData.txns.length > 0) ? liveData.txns : TXNS;
   const liveDocuments = (liveData && liveData.documents) ? liveData.documents : {};
+  const financialAccounts = (liveData && liveData.accounts) ? liveData.accounts : {};
   const loading = authLoading;
   const error = authError;
 
@@ -1615,6 +1850,7 @@ export default function App() {
         {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} clients={clients} valuations={valuations} holdings={holdings} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>}
         {section==="withdrawals" && <WithdrawalsPage selectedCcy={selectedCcy} withdrawals={withdrawals} clients={clients}/>}
         {section==="connect" && <Connect/>}
+        {section==="accounts" && <FinancialAccountsPage selectedCcy={selectedCcy} financialAccounts={financialAccounts} holdings={holdings} clients={clients} getAuthHeaders={getAuthHeaders}/>
       </div>
     </div>
   );
