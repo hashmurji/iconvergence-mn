@@ -1094,19 +1094,25 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
 
   // Flatten all accounts across clients
   const allAccounts = Object.values(financialAccounts).flat();
-  const filtered = search
-    ? allAccounts.filter(a => {
+  const filtered = useMemo(() => {
+    if (!search) return allAccounts;
+    const q = search.toLowerCase();
+    return allAccounts.filter(a => {
+      try {
         const clientName = getClientName(a.clientId).toLowerCase();
-        const q = search.toLowerCase();
         return (a.accountNumber||"").toLowerCase().includes(q) ||
                (a.accountName||"").toLowerCase().includes(q) ||
                (a.trustee||"").toLowerCase().includes(q) ||
                (a.clientId||"").toLowerCase().includes(q) ||
                clientName.includes(q);
-      })
-    : allAccounts;
+      } catch(e) { return false; }
+    });
+  }, [search, allAccounts, clients]);
 
-  const getClientName = (clientId) => clients.find(c=>c.id===clientId)?.name || clientId;
+  const getClientName = (clientId) => {
+    if (!clientId) return "—";
+    return (clients||[]).find(cl=>cl.id===clientId)?.name || clientId;
+  };
 
   // Load transactions when account selected
   useEffect(() => {
