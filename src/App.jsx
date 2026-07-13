@@ -135,6 +135,49 @@ const getAuthHeaders = () => {
   } catch(e) { return {}; }
 };
 
+const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+
+const useInactivityLogout = (logout, enabled) => {
+  useEffect(() => {
+    if (!enabled) return;
+    let timer;
+    const reset = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        sessionStorage.removeItem("mn_auth");
+        logout();
+      }, INACTIVITY_TIMEOUT_MS);
+    };
+    const events = ["mousedown","mousemove","keydown","scroll","touchstart","click"];
+    events.forEach(e => window.addEventListener(e, reset, { passive: true }));
+    reset();
+    return () => {
+      clearTimeout(timer);
+      events.forEach(e => window.removeEventListener(e, reset));
+    };
+  }, [enabled]);
+};
+
+const useTokenExpiry = (logout, enabled) => {
+  useEffect(() => {
+    if (!enabled) return;
+    const check = () => {
+      try {
+        const stored = sessionStorage.getItem("mn_auth");
+        if (!stored) return;
+        const { expiresAt } = JSON.parse(stored);
+        if (expiresAt && Date.now() > expiresAt) {
+          sessionStorage.removeItem("mn_auth");
+          logout();
+        }
+      } catch(e) {}
+    };
+    check();
+    const interval = setInterval(check, 60000); // check every minute
+    return () => clearInterval(interval);
+  }, [enabled]);
+};
+
 const useOneDriveData = (token) => {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1513,6 +1556,8 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
 export default function App() {
   const {user, loading: authLoading, error: authError, login, logout} = useAuth();
   const accessToken = user?.accessToken || getStoredAccessToken();
+  useInactivityLogout(logout, !!user);
+  useTokenExpiry(logout, !!user);
   const {data: liveData, loading: dataLoading, error: dataError, lastUpdated, refresh} = useOneDriveData(accessToken);
   const {stats: dashboardStats, refresh: refreshStats} = useDashboardStats(accessToken);
   const [section, setSection] = useState("dashboard");
