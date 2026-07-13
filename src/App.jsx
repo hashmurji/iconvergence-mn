@@ -137,6 +137,18 @@ const getAuthHeaders = () => {
 
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 
+const useFinancialAccounts = (token) => {
+  const [accounts, setAccounts] = useState({});
+  useEffect(() => {
+    if (!token) return;
+    fetch("/api/financialaccounts", { headers: { Authorization: "Bearer " + token } })
+      .then(r => r.json())
+      .then(d => { if (d.accounts) setAccounts(d.accounts); })
+      .catch(() => {});
+  }, [token]);
+  return { accounts };
+};
+
 const useInactivityLogout = (logout, enabled) => {
   useEffect(() => {
     if (!enabled) return;
@@ -198,10 +210,9 @@ const useOneDriveData = (token) => {
         fetch("/api/withdrawals"+bust, { headers: authHeader }),
         fetch("/api/distributions"+bust, { headers: authHeader }),
         fetch("/api/documents"+bust, { headers: authHeader }),
-        fetch("/api/financialaccounts"+bust, { headers: authHeader }),
       ]);
-      const [cj, vj, hj, wj, dj, docj, aj] = await Promise.all([
-        cr.json(), vr.json(), hr.json(), wr.json(), dr.json(), docr.json(), ar.json()
+      const [cj, vj, hj, wj, dj, docj] = await Promise.all([
+        cr.json(), vr.json(), hr.json(), wr.json(), dr.json(), docr.json()
       ]);
       if (cj.error) throw new Error(cj.error);
       const json = {
@@ -212,7 +223,7 @@ const useOneDriveData = (token) => {
         distributions: dj.distributions || {},
         txns: [],
         documents: docj.documents || {},
-        accounts: aj.accounts || {},
+        accounts: {},
         lastUpdated: cj.lastUpdated,
       };
       setData(json);
@@ -1093,7 +1104,7 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
   const [search, setSearch] = useState("");
 
   // Flatten all accounts across clients
-  const allAccounts = Object.values(financialAccounts).flat();
+  const allAccounts = useMemo(() => Object.values(financialAccounts||{}).flat(), [financialAccounts]);
   const filtered = useMemo(() => {
     if (!search) return allAccounts;
     const q = search.toLowerCase();
@@ -1809,6 +1820,7 @@ export default function App() {
   const accessToken = user?.accessToken || getStoredAccessToken();
   useInactivityLogout(logout, !!user);
   useTokenExpiry(logout, !!user);
+  const { accounts: financialAccountsLive } = useFinancialAccounts(accessToken);
   const {data: liveData, loading: dataLoading, error: dataError, lastUpdated, refresh} = useOneDriveData(accessToken);
   const {stats: dashboardStats, refresh: refreshStats} = useDashboardStats(accessToken);
   const [section, setSection] = useState("dashboard");
@@ -1825,7 +1837,7 @@ export default function App() {
   const distributions = (liveData && liveData.distributions) ? liveData.distributions : DISTRIBUTIONS;
   const txns = (liveData && liveData.txns && liveData.txns.length > 0) ? liveData.txns : TXNS;
   const liveDocuments = (liveData && liveData.documents) ? liveData.documents : {};
-  const financialAccounts = (liveData && liveData.accounts) ? liveData.accounts : {};
+  const financialAccounts = Object.keys(financialAccountsLive||{}).length > 0 ? financialAccountsLive : (liveData && liveData.accounts) ? liveData.accounts : {};
   const loading = authLoading;
   const error = authError;
 
