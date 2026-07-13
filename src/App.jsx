@@ -1104,6 +1104,10 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
   const [search, setSearch] = useState("");
 
   // Flatten all accounts across clients
+  const getClientName = (clientId) => {
+    if (!clientId) return "—";
+    return (clients||[]).find(cl=>cl.id===clientId)?.name || clientId;
+  };
   const allAccounts = useMemo(() => Object.values(financialAccounts||{}).flat(), [financialAccounts]);
   const accountsLoading = allAccounts.length === 0;
   const filtered = useMemo(() => {
@@ -1121,10 +1125,6 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
     });
   }, [search, allAccounts, clients]);
 
-  const getClientName = (clientId) => {
-    if (!clientId) return "—";
-    return (clients||[]).find(cl=>cl.id===clientId)?.name || clientId;
-  };
 
   // Load transactions when account selected
   useEffect(() => {
