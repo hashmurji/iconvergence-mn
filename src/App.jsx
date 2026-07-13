@@ -1850,7 +1850,7 @@ export default function App() {
         {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} clients={clients} valuations={valuations} holdings={holdings} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>}
         {section==="withdrawals" && <WithdrawalsPage selectedCcy={selectedCcy} withdrawals={withdrawals} clients={clients}/>}
         {section==="connect" && <Connect/>}
-        {section==="accounts" && <FinancialAccountsPage selectedCcy={selectedCcy} financialAccounts={financialAccounts} holdings={holdings} clients={clients} getAuthHeaders={getAuthHeaders}/>
+        {section==="accounts" && <FinancialAccountsPage selectedCcy={selectedCcy} financialAccounts={financialAccounts} holdings={holdings} clients={clients} getAuthHeaders={getAuthHeaders}/>}
       </div>
     </div>
   );
