@@ -784,7 +784,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
               <tbody>
                 {filteredTxns.map(t=>(
                   <tr key={t.id} style={{borderBottom:"0.5px solid "+C.silver}}>
-                    <td style={{padding:"8px 12px",color:C.faint,whiteSpace:"nowrap"}}>{t.tradedate ? new Date(t.tradedate).toLocaleDateString("en-GB") : t.tradeDate ? new Date(t.tradeDate).toLocaleDateString("en-GB") : ""}</td>
+                    <td style={{padding:"8px 12px",color:C.faint,whiteSpace:"nowrap"}}>{t.tradeDate||t.tradedate ? new Date(t.tradeDate||t.tradedate).toLocaleDateString("en-GB") : ""}</td>
                     <td style={{padding:"8px 12px"}}><Badge color={t.txtype==="BUY"?"success":t.txtype==="SELL"?"error":t.txtype==="Dividend"?"navy":"info"}>{t.txtype}</Badge></td>
                     <td style={{padding:"8px 12px",fontWeight:600,color:C.navy}}>{t.ticker}</td>
                     <td style={{padding:"8px 12px",color:C.text,maxWidth:220,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
@@ -865,7 +865,7 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
                       <td style={{padding:"10px 12px",fontFamily:"monospace",fontSize:12,color:C.faint}}>{p.accountNumber}</td>
                       <td style={{padding:"10px 12px",color:C.text}}>{p.recipient}</td>
                       <td style={{padding:"10px 12px",color:C.text}}>{p.date}</td>
-                      <td style={{padding:"10px 12px",fontWeight:600,color:C.navy,fontFamily:"Inter,sans-serif"}}>${fmt(p.amount,2)}</td>
+                      <td style={{padding:"10px 12px",fontWeight:600,color:C.navy,fontFamily:"Inter,sans-serif"}}>{sym}{fmt(parseFloat(p.amount)||0,2)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1026,8 +1026,8 @@ const WithdrawalsPage = ({selectedCcy, withdrawals: propWithdrawals, clients: pr
                 <td style={{padding:"10px 12px",color:C.text}}>{w.dateRequested}</td>
                 <td style={{padding:"10px 12px"}}><Badge color="info">{w.type}</Badge></td>
                 <td style={{padding:"10px 12px",color:C.faint}}>{w.currency}</td>
-                <td style={{padding:"10px 12px",color:C.navy}}>${fmt(w.requestedAmount,2)}</td>
-                <td style={{padding:"10px 12px",fontWeight:600,color:C.green}}>${fmt(w.actualPaid,2)}</td>
+                <td style={{padding:"10px 12px",color:C.navy}}>{sym}{fmt(parseFloat(w.requestedAmount)||0,2)}</td>
+                <td style={{padding:"10px 12px",fontWeight:600,color:C.green}}>{sym}{fmt(parseFloat(w.actualPaid)||0,2)}</td>
                 <td style={{padding:"10px 12px",color:C.text}}>{w.paymentDate}</td>
               </tr>
             ))}
@@ -1094,7 +1094,7 @@ const Connect = () => {
 
 
 // --- FINANCIAL ACCOUNTS PAGE -------------------------------------------------
-const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, clients, getAuthHeaders}) => {
+const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, clients}) => {
   const isMobile = useIsMobile();
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
   const [selectedAccount, setSelectedAccount] = useState(null);
@@ -1105,6 +1105,7 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
 
   // Flatten all accounts across clients
   const allAccounts = useMemo(() => Object.values(financialAccounts||{}).flat(), [financialAccounts]);
+  const accountsLoading = allAccounts.length === 0;
   const filtered = useMemo(() => {
     if (!search) return allAccounts;
     const q = search.toLowerCase();
@@ -1296,8 +1297,14 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by account number, name, trustee or client ID..."
           style={{padding:"8px 12px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",flex:1,color:C.navy}}/>
       </div>
-      <div style={{fontSize:12,color:C.faint,marginBottom:12}}>{filtered.length} account{filtered.length!==1?"s":""}</div>
-      <div style={{overflowX:"auto"}}>
+      {accountsLoading && (
+        <div style={{padding:32,display:"flex",alignItems:"center",gap:12}}>
+          <div style={{width:20,height:20,border:"3px solid rgba(16,198,193,0.3)",borderTop:"3px solid #10C6C1",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+          <span style={{color:C.faint,fontSize:14}}>Loading financial accounts...</span>
+        </div>
+      )}
+      {!accountsLoading && <div style={{fontSize:12,color:C.faint,marginBottom:12}}>{filtered.length} account{filtered.length!==1?"s":""}</div>}
+      {!accountsLoading && <div style={{overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
           <thead>
             <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
@@ -1335,7 +1342,7 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
             ))}
           </tbody>
         </table>
-      </div>
+      </div>}
     </div>
   );
 };
@@ -1717,7 +1724,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
                 <tbody>
                   {filteredTxns.map(t=>(
                     <tr key={t.id} style={{borderBottom:"0.5px solid "+C.silver}}>
-                      <td style={{padding:"8px 12px",color:C.faint,whiteSpace:"nowrap"}}>{t.tradedate ? new Date(t.tradedate).toLocaleDateString("en-GB") : t.tradeDate ? new Date(t.tradeDate).toLocaleDateString("en-GB") : ""}</td>
+                      <td style={{padding:"8px 12px",color:C.faint,whiteSpace:"nowrap"}}>{t.tradeDate||t.tradedate ? new Date(t.tradeDate||t.tradedate).toLocaleDateString("en-GB") : ""}</td>
                       <td style={{padding:"8px 12px"}}><Badge color={t.txtype==="BUY"?"success":t.txtype==="SELL"?"error":t.txtype==="Dividend"?"navy":"info"}>{t.txtype}</Badge></td>
                       <td style={{padding:"8px 12px",fontWeight:600,color:C.navy}}>{t.ticker}</td>
                       <td style={{padding:"8px 12px",color:C.text,maxWidth:200,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.description}</td>
@@ -1751,8 +1758,8 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
                     <td style={{padding:"10px 12px",color:C.text}}>{w.dateRequested}</td>
                     <td style={{padding:"10px 12px"}}><Badge color="info">{w.type}</Badge></td>
                     <td style={{padding:"10px 12px",color:C.faint}}>{w.currency}</td>
-                    <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>${fmt(w.requestedAmount,2)}</td>
-                    <td style={{padding:"10px 12px",fontWeight:600,color:C.green}}>${fmt(w.actualPaid,2)}</td>
+                    <td style={{padding:"10px 12px",fontWeight:600,color:C.navy}}>{sym}{fmt(parseFloat(w.requestedAmount)||0,2)}</td>
+                    <td style={{padding:"10px 12px",fontWeight:600,color:C.green}}>{sym}{fmt(parseFloat(w.actualPaid)||0,2)}</td>
                     <td style={{padding:"10px 12px",color:C.text}}>{w.paymentDate}</td>
                   </tr>
                 ))}
@@ -1800,7 +1807,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
                         <td style={{padding:"10px 10px",fontFamily:"monospace",fontSize:12,color:C.faint}}>{p.accountNumber}</td>
                         <td style={{padding:"10px 10px",color:C.text}}>{p.recipient}</td>
                         <td style={{padding:"10px 10px",color:C.text}}>{p.date}</td>
-                        <td style={{padding:"10px 10px",fontWeight:600,color:C.navy,fontFamily:"Inter,sans-serif"}}>${fmt(p.amount,2)}</td>
+                        <td style={{padding:"10px 10px",fontWeight:600,color:C.navy,fontFamily:"Inter,sans-serif"}}>{sym}{fmt(parseFloat(p.amount)||0,2)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1879,7 +1886,7 @@ export default function App() {
         {section==="clients" && <ClientsList selectedClient={selectedClient} setSelectedClient={setSelectedClient} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} clients={clients} valuations={valuations} holdings={holdings} withdrawals={withdrawals} distributions={distributions} txns={txns} liveDocuments={liveDocuments}/>}
         {section==="withdrawals" && <WithdrawalsPage selectedCcy={selectedCcy} withdrawals={withdrawals} clients={clients}/>}
         {section==="connect" && <Connect/>}
-        {section==="accounts" && <FinancialAccountsPage selectedCcy={selectedCcy} financialAccounts={financialAccounts} holdings={holdings} clients={clients} getAuthHeaders={getAuthHeaders}/>}
+        {section==="accounts" && <FinancialAccountsPage selectedCcy={selectedCcy} financialAccounts={financialAccounts} holdings={holdings} clients={clients}/>}
       </div>
     </div>
   );
