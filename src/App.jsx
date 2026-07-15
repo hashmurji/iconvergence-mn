@@ -924,9 +924,100 @@ const ClientDetail = ({clientId, onBack, selectedCcy, setPreviewClient, holdings
   );
 };
 
+// --- SHARED TABLE SORT/FILTER HELPERS -----------------------------------------
+const compareForSort = (a, b, dir) => {
+  const aEmpty = a === null || a === undefined || a === "";
+  const bEmpty = b === null || b === undefined || b === "";
+  if (aEmpty && bEmpty) return 0;
+  if (aEmpty) return 1; // rows with no value always sort last, either direction
+  if (bEmpty) return -1;
+  let cmp;
+  if (typeof a === "number" && typeof b === "number") cmp = a - b;
+  else cmp = String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+  return dir === "desc" ? -cmp : cmp;
+};
+
+const SortIcon = ({ active, dir }) => {
+  if (!active) return <span style={{opacity:0.35,marginLeft:4,fontSize:10}}>↕</span>;
+  return <span style={{color:C.teal,marginLeft:4,fontSize:10}}>{dir==="asc"?"↑":"↓"}</span>;
+};
+
+// A small header cell that toggles sort on click, used by both the clients
+// and financial accounts tables.
+const SortableTh = ({ col, sortKey, sortDir, onSort }) => (
+  <th onClick={()=>onSort(col.key)} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap",cursor:"pointer",userSelect:"none"}}>
+    {col.label}<SortIcon active={sortKey===col.key} dir={sortDir}/>
+  </th>
+);
+
+// The filter-row cell below each header: a dropdown for "select" columns
+// (populated from the data itself), a min/max pair for "number" columns,
+// or a free-text contains-filter otherwise.
+const FilterTh = ({ col, value, options, onChange }) => (
+  <th style={{padding:"6px 12px",fontWeight:400}}>
+    {col.type === "select" ? (
+      <select value={value||""} onChange={e=>onChange(e.target.value)}
+        style={{width:"100%",fontSize:11,padding:"4px 6px",border:"1px solid "+C.silverMid,borderRadius:4,fontFamily:"'Inter',sans-serif",color:C.text,background:C.white}}>
+        <option value="">All</option>
+        {(options||[]).map(v=>(<option key={v} value={v}>{v}</option>))}
+      </select>
+    ) : col.type === "number" ? (
+      <div style={{display:"flex",gap:4}}>
+        <input type="number" placeholder="Min" value={value?.min ?? ""} onChange={e=>onChange({...(value||{}), min: e.target.value})}
+          style={{width:"50%",fontSize:11,padding:"4px 6px",border:"1px solid "+C.silverMid,borderRadius:4,fontFamily:"'Inter',sans-serif",color:C.text,boxSizing:"border-box"}}/>
+        <input type="number" placeholder="Max" value={value?.max ?? ""} onChange={e=>onChange({...(value||{}), max: e.target.value})}
+          style={{width:"50%",fontSize:11,padding:"4px 6px",border:"1px solid "+C.silverMid,borderRadius:4,fontFamily:"'Inter',sans-serif",color:C.text,boxSizing:"border-box"}}/>
+      </div>
+    ) : (
+      <input value={value||""} onChange={e=>onChange(e.target.value)} placeholder="Filter..."
+        style={{width:"100%",fontSize:11,padding:"4px 6px",border:"1px solid "+C.silverMid,borderRadius:4,fontFamily:"'Inter',sans-serif",color:C.text,boxSizing:"border-box"}}/>
+    )}
+  </th>
+);
+
+const isActiveColFilter = (col, value) => {
+  if (!value) return false;
+  if (col.type === "number") return !!(value.min || value.max);
+  return true;
+};
+
+const applyColFilter = (rows, col, value, getCellValue) => {
+  if (!isActiveColFilter(col, value)) return rows;
+  if (col.type === "select") {
+    return rows.filter(row => getCellValue(row, col.key) === value);
+  }
+  if (col.type === "number") {
+    return rows.filter(row => {
+      const cell = getCellValue(row, col.key);
+      if (cell === null || cell === undefined) return false;
+      if (value.min !== undefined && value.min !== "" && cell < parseFloat(value.min)) return false;
+      if (value.max !== undefined && value.max !== "" && cell > parseFloat(value.max)) return false;
+      return true;
+    });
+  }
+  return rows.filter(row => {
+    const cell = getCellValue(row, col.key);
+    return cell !== null && cell !== undefined && String(cell).toLowerCase().includes(String(value).toLowerCase());
+  });
+};
+
 // --- CLIENTS LIST ------------------------------------------------------------
+const CLIENT_TABLE_COLUMNS = [
+  { key: "name", label: "Client", type: "text" },
+  { key: "id", label: "ID", type: "text" },
+  { key: "jurisdiction", label: "Jurisdiction", type: "select" },
+  { key: "reportingCcy", label: "Reporting CCY", type: "select" },
+  { key: "assetValuation", label: "Asset Valuation", type: "number" },
+  { key: "cash", label: "Cash", type: "number" },
+  { key: "liabilities", label: "Liabilities", type: "number" },
+  { key: "status", label: "Status", type: "select" },
+];
+
 const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreviewClient, clients: propClients, valuations: propValuations, holdings: propHoldings, withdrawals: propWithdrawals, distributions: propDistributions, txns: propTxns, liveDocuments}) => {
   const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const [colFilters, setColFilters] = useState({});
   const isMobile = useIsMobile();
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
   const clients = propClients || [];
@@ -936,9 +1027,49 @@ const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreview
     return <ClientDetail clientId={selectedClient} onBack={()=>setSelectedClient(null)} selectedCcy={selectedCcy} setPreviewClient={setPreviewClient} holdings={propHoldings} withdrawals={propWithdrawals} distributions={propDistributions} txns={propTxns} valuations={valuations} clients={clients} liveDocuments={liveDocuments}/>;
   }
 
-  const filtered = clients.filter(c =>
-    !search || [c.name, c.id, c.primaryCode, c.email].some(v => v && v.toLowerCase().includes(search.toLowerCase()))
-  );
+  const getCellValue = (c, key) => {
+    const val = valuations[c.id];
+    switch (key) {
+      case "name": return c.name;
+      case "id": return c.primaryCode;
+      case "jurisdiction": return c.jurisdiction;
+      case "reportingCcy": return c.reportingCcy;
+      case "assetValuation": return val ? convertAmount(val.totalAssetValuation, val.currency||"USD", selectedCcy) : null;
+      case "cash": return val ? convertAmount(val.totalCashBalance, val.currency||"USD", selectedCcy) : null;
+      case "liabilities": return val ? convertAmount(val.totalLiabilities, val.currency||"USD", selectedCcy) : null;
+      case "status": return c.verified ? "Verified" : "Pending";
+      default: return null;
+    }
+  };
+
+  const filterOptions = useMemo(() => {
+    const opts = {};
+    CLIENT_TABLE_COLUMNS.filter(col => col.type === "select").forEach(col => {
+      const values = new Set(clients.map(c => getCellValue(c, col.key)).filter(v => v !== null && v !== undefined && v !== ""));
+      opts[col.key] = Array.from(values).sort();
+    });
+    return opts;
+  }, [clients, valuations, selectedCcy]);
+
+  const filtered = useMemo(() => {
+    let rows = clients.filter(c =>
+      !search || [c.name, c.id, c.primaryCode, c.email].some(v => v && v.toLowerCase().includes(search.toLowerCase()))
+    );
+    CLIENT_TABLE_COLUMNS.forEach(col => {
+      rows = applyColFilter(rows, col, colFilters[col.key], getCellValue);
+    });
+    if (sortKey) {
+      rows = [...rows].sort((a,b) => compareForSort(getCellValue(a, sortKey), getCellValue(b, sortKey), sortDir));
+    }
+    return rows;
+  }, [clients, search, colFilters, sortKey, sortDir, valuations, selectedCcy]);
+
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+
+  const activeFilterCount = CLIENT_TABLE_COLUMNS.filter(col => isActiveColFilter(col, colFilters[col.key])).length;
 
   return (
     <div style={{padding:isMobile?"12px":24}}>
@@ -946,16 +1077,27 @@ const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreview
         <div style={{fontSize:10,fontWeight:600,letterSpacing:3,textTransform:"uppercase",color:C.teal,marginBottom:3}}>Client Management</div>
         <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?20:24,fontWeight:600,color:C.navy}}>All Clients</div>
       </div>
-      <div style={{display:"flex",gap:10,marginBottom:16}}>
+      <div style={{display:"flex",gap:10,marginBottom:16,alignItems:"center"}}>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by name, ID or email..." style={{padding:"8px 12px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",flex:1,color:C.navy}}/>
+        {activeFilterCount > 0 && (
+          <button onClick={()=>setColFilters({})} style={{background:"none",border:"1.5px solid "+C.silverMid,borderRadius:6,padding:"8px 12px",fontSize:12,color:C.faint,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap"}}>
+            Clear column filters ({activeFilterCount})
+          </button>
+        )}
       </div>
       <div style={{fontSize:12,color:C.faint,marginBottom:12}}>{filtered.length} client{filtered.length!==1?"s":""} {clients.length > 1 ? "("+clients.length+" total)" : ""}</div>
       <div style={{overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
           <thead>
             <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
-              {["Client","ID","Jurisdiction","Reporting CCY","Asset Valuation","Cash","Liabilities","Status"].map(h=>(
-                <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+              {CLIENT_TABLE_COLUMNS.map(col=>(
+                <SortableTh key={col.key} col={col} sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}/>
+              ))}
+            </tr>
+            <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.white}}>
+              {CLIENT_TABLE_COLUMNS.map(col=>(
+                <FilterTh key={col.key} col={col} value={colFilters[col.key]} options={filterOptions[col.key]}
+                  onChange={v=>setColFilters(f=>({...f,[col.key]:v}))}/>
               ))}
             </tr>
           </thead>
@@ -987,6 +1129,9 @@ const ClientsList = ({selectedClient, setSelectedClient, selectedCcy, setPreview
                 </tr>
               );
             })}
+            {filtered.length === 0 && (
+              <tr><td colSpan={CLIENT_TABLE_COLUMNS.length} style={{padding:24,textAlign:"center",color:C.faint}}>No clients match these filters</td></tr>
+            )}
           </tbody>
         </table>
       </div>
@@ -1098,6 +1243,18 @@ const Connect = () => {
 
 
 // --- FINANCIAL ACCOUNTS PAGE -------------------------------------------------
+const ACCOUNT_TABLE_COLUMNS = [
+  { key: "client", label: "Client", type: "text" },
+  { key: "accountNumber", label: "Account Number", type: "text" },
+  { key: "accountName", label: "Account Name", type: "text" },
+  { key: "trustee", label: "Trustee", type: "select" },
+  { key: "currency", label: "Currency", type: "select" },
+  { key: "totalValue", label: "Total Value", type: "number" },
+  { key: "assetValuation", label: "Asset Valuation", type: "number" },
+  { key: "cashBalance", label: "Cash Balance", type: "number" },
+  { key: "surrenderRebate", label: "Surrender Rebate", type: "number" },
+];
+
 const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, clients}) => {
   const isMobile = useIsMobile();
   const sym = CCY_SYMBOLS[selectedCcy] || "$";
@@ -1106,6 +1263,9 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
   const [accountTxns, setAccountTxns] = useState([]);
   const [txnLoading, setTxnLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState(null);
+  const [sortDir, setSortDir] = useState("asc");
+  const [colFilters, setColFilters] = useState({});
 
   // Flatten all accounts across clients
   const getClientName = (clientId) => {
@@ -1114,20 +1274,61 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
   };
   const allAccounts = useMemo(() => Object.values(financialAccounts||{}).flat(), [financialAccounts]);
   const accountsLoading = allAccounts.length === 0;
-  const filtered = useMemo(() => {
-    if (!search) return allAccounts;
-    const q = search.toLowerCase();
-    return allAccounts.filter(a => {
-      try {
-        const clientName = getClientName(a.clientId).toLowerCase();
-        return (a.accountNumber||"").toLowerCase().includes(q) ||
-               (a.accountName||"").toLowerCase().includes(q) ||
-               (a.trustee||"").toLowerCase().includes(q) ||
-               (a.clientId||"").toLowerCase().includes(q) ||
-               clientName.includes(q);
-      } catch(e) { return false; }
+
+  const getCellValue = (a, key) => {
+    switch (key) {
+      case "client": return getClientName(a.clientId);
+      case "accountNumber": return a.accountNumber;
+      case "accountName": return a.accountName;
+      case "trustee": return a.trustee;
+      case "currency": return a.currency;
+      case "totalValue": return typeof a.totalValue === "number" ? convertAmount(a.totalValue, a.currency, selectedCcy) : null;
+      case "assetValuation": return typeof a.assetValuation === "number" ? convertAmount(a.assetValuation, a.currency, selectedCcy) : null;
+      case "cashBalance": return typeof a.cashBalance === "number" ? convertAmount(a.cashBalance, a.currency, selectedCcy) : null;
+      case "surrenderRebate": return typeof a.remainingSurrenderRebate === "number" ? convertAmount(a.remainingSurrenderRebate, a.currency, selectedCcy) : null;
+      default: return null;
+    }
+  };
+
+  const filterOptions = useMemo(() => {
+    const opts = {};
+    ACCOUNT_TABLE_COLUMNS.filter(col => col.type === "select").forEach(col => {
+      const values = new Set(allAccounts.map(a => getCellValue(a, col.key)).filter(v => v !== null && v !== undefined && v !== ""));
+      opts[col.key] = Array.from(values).sort();
     });
-  }, [search, allAccounts, clients]);
+    return opts;
+  }, [allAccounts, clients, selectedCcy]);
+
+  const filtered = useMemo(() => {
+    let rows = allAccounts;
+    if (search) {
+      const q = search.toLowerCase();
+      rows = rows.filter(a => {
+        try {
+          const clientName = getClientName(a.clientId).toLowerCase();
+          return (a.accountNumber||"").toLowerCase().includes(q) ||
+                 (a.accountName||"").toLowerCase().includes(q) ||
+                 (a.trustee||"").toLowerCase().includes(q) ||
+                 (a.clientId||"").toLowerCase().includes(q) ||
+                 clientName.includes(q);
+        } catch(e) { return false; }
+      });
+    }
+    ACCOUNT_TABLE_COLUMNS.forEach(col => {
+      rows = applyColFilter(rows, col, colFilters[col.key], getCellValue);
+    });
+    if (sortKey) {
+      rows = [...rows].sort((a,b) => compareForSort(getCellValue(a, sortKey), getCellValue(b, sortKey), sortDir));
+    }
+    return rows;
+  }, [search, allAccounts, clients, colFilters, sortKey, sortDir, selectedCcy]);
+
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir(d => d === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir("asc"); }
+  };
+
+  const activeFilterCount = ACCOUNT_TABLE_COLUMNS.filter(col => isActiveColFilter(col, colFilters[col.key])).length;
 
 
   // Load transactions when account selected
@@ -1297,9 +1498,14 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
         <div style={{fontSize:10,fontWeight:600,letterSpacing:3,textTransform:"uppercase",color:C.teal,marginBottom:3}}>Account Management</div>
         <div style={{fontFamily:"Inter,sans-serif",fontSize:isMobile?20:24,fontWeight:600,color:C.navy}}>Financial Accounts</div>
       </div>
-      <div style={{display:"flex",gap:10,marginBottom:16}}>
+      <div style={{display:"flex",gap:10,marginBottom:16,alignItems:"center"}}>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by account number, name, trustee or client ID..."
           style={{padding:"8px 12px",border:"1.5px solid "+C.silverMid,borderRadius:6,fontSize:13,fontFamily:"'Inter',sans-serif",flex:1,color:C.navy}}/>
+        {activeFilterCount > 0 && (
+          <button onClick={()=>setColFilters({})} style={{background:"none",border:"1.5px solid "+C.silverMid,borderRadius:6,padding:"8px 12px",fontSize:12,color:C.faint,cursor:"pointer",fontFamily:"'Inter',sans-serif",whiteSpace:"nowrap"}}>
+            Clear column filters ({activeFilterCount})
+          </button>
+        )}
       </div>
       {accountsLoading && (
         <div style={{padding:32,display:"flex",alignItems:"center",gap:12}}>
@@ -1312,8 +1518,14 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}>
           <thead>
             <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.silver}}>
-              {["Client","Account Number","Account Name","Trustee","Currency","Total Value","Asset Valuation","Cash Balance","Surrender Rebate"].map(h=>(
-                <th key={h} style={{textAlign:"left",padding:"8px 12px",fontSize:10,fontWeight:600,color:C.faint,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+              {ACCOUNT_TABLE_COLUMNS.map(col=>(
+                <SortableTh key={col.key} col={col} sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}/>
+              ))}
+            </tr>
+            <tr style={{borderBottom:"1.5px solid "+C.silver,background:C.white}}>
+              {ACCOUNT_TABLE_COLUMNS.map(col=>(
+                <FilterTh key={col.key} col={col} value={colFilters[col.key]} options={filterOptions[col.key]}
+                  onChange={v=>setColFilters(f=>({...f,[col.key]:v}))}/>
               ))}
             </tr>
           </thead>
@@ -1344,6 +1556,9 @@ const FinancialAccountsPage = ({selectedCcy, financialAccounts, holdings, client
                 <td style={{padding:"10px 12px",color:C.red,whiteSpace:"nowrap"}}>{sym}{fmt(convertAmount(a.remainingSurrenderRebate,a.currency,selectedCcy),0)}</td>
               </tr>
             ))}
+            {!accountsLoading && filtered.length === 0 && (
+              <tr><td colSpan={ACCOUNT_TABLE_COLUMNS.length} style={{padding:24,textAlign:"center",color:C.faint}}>No accounts match these filters</td></tr>
+            )}
           </tbody>
         </table>
       </div>}
