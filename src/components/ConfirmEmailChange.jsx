@@ -68,7 +68,7 @@ export default function ConfirmEmailChange() {
   return (
     <div className="ecf">
       <div className="ecf__brand">
-        <div className="ecf__brand-mark" aria-hidden="true" />
+        <img src="/ubiquity-mark.png" alt="Ubiquity" className="ecf__logo" />
         <span className="ecf__brand-name">Ubiquity</span>
       </div>
       <div className="ecf__card">

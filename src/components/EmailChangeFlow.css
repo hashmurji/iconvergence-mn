@@ -24,12 +24,9 @@
   margin-bottom: 40px;
 }
 
-.ecf__brand-mark {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--teal), var(--blue));
-  flex-shrink: 0;
+.ecf__logo {
+  height: 28px;
+  width: auto;
 }
 
 .ecf__brand-name {

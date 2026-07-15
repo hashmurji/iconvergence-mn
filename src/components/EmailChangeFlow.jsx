@@ -10,7 +10,7 @@ const CLIENT_NUMBER_RE = /^C\d{8}$/i;
 function BrandHeader() {
   return (
     <div className="ecf__brand">
-      <div className="ecf__brand-mark" aria-hidden="true" />
+      <img src="/ubiquity-mark.png" alt="Ubiquity" className="ecf__logo" />
       <span className="ecf__brand-name">Ubiquity</span>
     </div>
   );
@@ -19,8 +19,8 @@ function BrandHeader() {
 function FooterNote() {
   return (
     <p className="ecf__footer-note">
-      Not sure what to do next? Contact your adviser, or call us on the number
-      listed in your most recent correspondence.
+      Not sure what to do next? Email us at{' '}
+      <a href="mailto:portaladministration@iconvergence.co.uk">portaladministration@iconvergence.co.uk</a>
     </p>
   );
 }
@@ -215,7 +215,7 @@ function IdentityStep({ onBack, onSubmit, submitting, serverError }) {
         />
         <p className="ecf__hint">
           This starts with the letter C followed by 8 digits, and can be found
-          on your Brite or Ubiquity correspondence.
+          on your Brite or MN correspondence.
         </p>
         {errors.clientNumber && <p className="ecf__error">{errors.clientNumber}</p>}
       </div>
