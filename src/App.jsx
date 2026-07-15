@@ -1,4 +1,8 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
+// Adjust these two paths to wherever you place the files —
+// assumed here to sit alongside App.jsx in a components/ folder.
+import EmailChangeFlow from "./components/EmailChangeFlow.jsx";
+import ConfirmEmailChange from "./components/ConfirmEmailChange.jsx";
 
 // --- AUTH0 CONFIG ------------------------------------------------------------
 const AUTH0_DOMAIN = "iconvergence.uk.auth0.com";
@@ -1822,7 +1826,7 @@ const ClientPortal = ({user, logout, selectedCcy, setCcy, isPreview, holdings: p
 };
 
 // --- APP ---------------------------------------------------------------------
-export default function App() {
+function MainApp() {
   const {user, loading: authLoading, error: authError, login, logout} = useAuth();
   const accessToken = user?.accessToken || getStoredAccessToken();
   useInactivityLogout(logout, !!user);
@@ -1890,4 +1894,16 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+// Thin router: these two pages must work for people who may not be able to
+// log in (that's the whole point of the "no access to old email" path), so
+// this check happens before useAuth or anything else runs. No hooks here —
+// App itself is just a switch, all the existing logic still lives in
+// MainApp untouched.
+export default function App() {
+  const pathname = typeof window !== "undefined" ? window.location.pathname : "";
+  if (pathname === "/change-email") return <EmailChangeFlow />;
+  if (pathname === "/confirm-email-change") return <ConfirmEmailChange />;
+  return <MainApp />;
 }
